@@ -6,15 +6,21 @@ from modules.transformer import TransformerEncoder
 from torch import nn
 import torch
 import torch.nn.functional as F
+from my_py_toolkit.torch.transformers_pkg import load_bert
+
+# todo: 测试用
+from transformers.optimization import AdamW
+from torch.optim import AdamW, Adam
 
 
 class TENER(nn.Module):
-    def __init__(self, tag_vocab, embed, num_layers, d_model, n_head, feedforward_dim, dropout,
-                 after_norm=True, attn_type='adatrans',  bi_embed=None,
+    def __init__(self, tag_vocab, bert_cfg, dim_embedding, num_layers, d_model, n_head, feedforward_dim, dropout,
+                 after_norm=True, attn_type='adatrans',  
+                 # bi_embed=None,
                  fc_dropout=0.3, pos_embed=None, scale=False, dropout_attn=None):
         """
 
-        :param tag_vocab: fastNLP Vocabulary
+        :param tag_vocab: fastNLP Vocabulary, ner 的 label
         :param embed: fastNLP TokenEmbedding
         :param num_layers: number of self-attention layers
         :param d_model: input size
@@ -29,12 +35,13 @@ class TENER(nn.Module):
         """
         super().__init__()
 
-        self.embed = embed
-        embed_size = self.embed.embed_size
-        self.bi_embed = None
-        if bi_embed is not None:
-            self.bi_embed = bi_embed
-            embed_size += self.bi_embed.embed_size
+        # self.embed = embed
+        self.bert = load_bert(bert_cfg, True)
+        embed_size = dim_embedding
+        # self.bi_embed = None
+        # if bi_embed is not None:
+        #     self.bi_embed = bi_embed
+        #     embed_size += self.bi_embed.embed_size
 
         self.in_fc = nn.Linear(embed_size, d_model)
 
@@ -49,12 +56,13 @@ class TENER(nn.Module):
         self.crf = ConditionalRandomField(len(tag_vocab), include_start_end_trans=True, allowed_transitions=trans)
 
 
-    def _forward(self, chars, target, bigrams=None):
-        mask = chars.ne(0)
-        chars = self.embed(chars)
-        if self.bi_embed is not None:
-            bigrams = self.bi_embed(bigrams)
-            chars = torch.cat([chars, bigrams], dim=-1)
+    def _forward(self, inputs_idx, target, segments, bigrams=None):
+        mask = inputs_idx.ne(0)
+        chars, _ = self.bert(inputs_idx, segments)
+        # chars = self.embed(chars)
+        # if self.bi_embed is not None:
+        #     bigrams = self.bi_embed(bigrams)
+        #     chars = torch.cat([chars, bigrams], dim=-1)
 
         chars = self.in_fc(chars)
         chars = self.transformer(chars, mask)
@@ -68,8 +76,8 @@ class TENER(nn.Module):
             loss = self.crf(logits, target, mask)
             return {'loss': loss}
 
-    def forward(self, chars, target, bigrams=None):
-        return self._forward(chars, target, bigrams)
+    def forward(self, chars, target, segments, bigrams=None):
+        return self._forward(chars, target, segments, bigrams)
 
-    def predict(self, chars, bigrams=None):
-        return self._forward(chars, target=None, bigrams=bigrams)
+    def predict(self, chars, segments, bigrams=None):
+        return self._forward(chars, target=None, segments=segments, bigrams=bigrams)
