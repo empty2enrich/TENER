@@ -22,6 +22,22 @@ from my_py_toolkit.log.logger import get_logger
 from models.TENER_BERT import TENER
 from seqeval.metrics import classification_report
 
+from torch.optim.lr_scheduler import LambdaLR
+
+def get_linear_warmup(optizer, nums_warmup_step, nums_train_step, last_epoch=-1):
+    def warmup(cur_step):
+        if cur_step < nums_warmup_step:
+            return cur_step / max(0, nums_warmup_step)
+        return max(0, nums_train_step - cur_step)/max(1, nums_train_step - nums_warmup_step)
+    return LambdaLR(optizer, warmup, last_epoch)
+
+def get_linear_warmup_2(optizer, nums_warmup_step, nums_train_step, last_epoch=-1):
+    def warmup(cur_step):
+        if cur_step < nums_warmup_step:
+            return cur_step / max(0, nums_warmup_step)
+        return 1
+    return LambdaLR(optizer, warmup, last_epoch)    
+
 def convert_label_idx(labels_idx, labels_mapping):
     return [labels_mapping[v] for v in labels_idx]
 
@@ -52,12 +68,14 @@ def main():
     max_len = bert_cfg.get('max_position_embeddings')
     dim_embedding = bert_cfg.get('hidden_size')
     batch_size = 4
-    epochs = 10
+    epochs = 5
     number_layer = 5
     d_model = 512
     heads_num = 8
     dim_feedforward = 2048
     dropout = 0.90
+    warmup = 100
+    lr = 3e-5
     device = 'cuda'
     dir_saved_model = './cache/model/'
     
@@ -80,13 +98,14 @@ def main():
     model = TENER(tags_mapping, bert_cfg_path, dim_embedding, number_layer, d_model, heads_num, dim_feedforward,
                   dropout).to(device)
     
-    opt = torch.optim.AdamW([p for p in model.parameters() if p.requires_grad==True])
+    opt = torch.optim.AdamW([p for p in model.parameters() if p.requires_grad==True], lr=lr)
     # torch.optim
     losses = []
     for folder, (train_data, test_data) in enumerate(get_k_folder_dataloder(data_paths, bert_cfg_path, tags_path, max_len, split_label, batch_size, cache_dir)):
         # 全训练机器太慢，只训练部分。
         if folder > 0:
             break
+        scheduler = get_linear_warmup_2(opt, warmup, len(train_data) * epochs)
         for epoch in range(epochs):
             model.train()
             for step, (input_idx, label_idx, segments, mask) in tqdm(enumerate(train_data)):
@@ -98,6 +117,7 @@ def main():
                 losses.append(loss.item())
                 loss.backward()
                 opt.step()
+                scheduler.step()
                 logger.info(f'epoch: {epoch}, {folder} Folder, Step: {step}, loss: {loss.item()}')
             torch.save(model.state_dict(), os.path.join(dir_saved_model, f'tener_weight_{folder}_{epoch}.pkl'))
             
