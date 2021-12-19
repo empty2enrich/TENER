@@ -67,13 +67,13 @@ def main():
     bert_cfg = readjson(os.path.join(bert_cfg_path, 'bert_config.json'))
     max_len = 64 # bert_cfg.get('max_position_embeddings')
     dim_embedding = bert_cfg.get('hidden_size')
-    batch_size = 50
+    batch_size = 70
     epochs = 6
     number_layer = 1
     d_model = 768 
-    heads_num = 8
+    heads_num = 128      
     dim_feedforward = 2048
-    dropout = 0.90
+    dropout = 0.95
     warmup = 100
     lr = 3e-5
     bert_lr = 3e-5

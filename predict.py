@@ -15,6 +15,8 @@ from models.TENER_BERT import TENER
 from my_py_toolkit.file.file_toolkit import read_file, readjson, make_path_legal, writejson
 from my_py_toolkit.torch.transformers_pkg import bert_tokenize
 from my_py_toolkit.ml.data.text_preprocess import tokenize_chinese
+from my_py_toolkit.ml.ner.ner_toolkit import handle_predict
+
 
 from torch.utils.data import DataLoader, TensorDataset
 
@@ -54,41 +56,41 @@ def generate_res(id, label_pre, tokens, txt, idx_tranf):
     
     # 删除 '[CLS]' 和 '[SEP]'
     # tokens = tokens[1:-1]
-    label_info = {}
-    start = 0
-    cur_tag = ''
-    is_tag = False
-    for i, label in enumerate(label_pre):
-        if label.startswith('S-'):
-            cur_tag = label[2:].lower()
-            cur_tag_info = label_info.get(cur_tag, {})
-            start_txt, end_txt = idx_tranf.to_ori_scope(i-1, i)
-            ner_cont = txt[start_txt:end_txt]
-            cur_cont_info = cur_tag_info.get(ner_cont, [])
+    label_info = handle_predict(txt, label_pre, idx_tranf)
+    # start = 0
+    # cur_tag = ''
+    # is_tag = False
+    # for i, label in enumerate(label_pre):
+    #     if label.startswith('S-'):
+    #         cur_tag = label[2:].lower()
+    #         cur_tag_info = label_info.get(cur_tag, {})
+    #         start_txt, end_txt = idx_tranf.to_ori_scope(i-1, i)
+    #         ner_cont = txt[start_txt:end_txt]
+    #         cur_cont_info = cur_tag_info.get(ner_cont, [])
             
-            cur_cont_info.append([start_txt, end_txt - 1])
-            cur_tag_info[ner_cont] = cur_cont_info
-            label_info[cur_tag] = cur_tag_info
-        elif label.startswith('B-'):
-            is_tag = True
-            start = i
-            cur_tag = label[2:].lower()
-        elif label.startswith('I-'):
-            if not is_tag or label[2:].lower() != cur_tag:
-                is_tag = False
-        elif label.startswith('E-'):
-            if not is_tag or label[2:].lower() != cur_tag:
-                is_tag = False
-                continue
-            cur_tag_info = label_info.get(cur_tag, {})
-            start_txt, end_txt = idx_tranf.to_ori_scope(start-1, i)
-            ner_cont = txt[start_txt:end_txt]
-            cur_cont_info = cur_tag_info.get(ner_cont, [])
-            cur_cont_info.append([start_txt, end_txt - 1])
-            cur_tag_info[ner_cont] = cur_cont_info
-            label_info[cur_tag] = cur_tag_info
-        elif label.startswith('O'):
-            is_tag = False
+    #         cur_cont_info.append([start_txt, end_txt - 1])
+    #         cur_tag_info[ner_cont] = cur_cont_info
+    #         label_info[cur_tag] = cur_tag_info
+    #     elif label.startswith('B-'):
+    #         is_tag = True
+    #         start = i
+    #         cur_tag = label[2:].lower()
+    #     elif label.startswith('I-'):
+    #         if not is_tag or label[2:].lower() != cur_tag:
+    #             is_tag = False
+    #     elif label.startswith('E-'):
+    #         if not is_tag or label[2:].lower() != cur_tag:
+    #             is_tag = False
+    #             continue
+    #         cur_tag_info = label_info.get(cur_tag, {})
+    #         start_txt, end_txt = idx_tranf.to_ori_scope(start-1, i)
+    #         ner_cont = txt[start_txt:end_txt]
+    #         cur_cont_info = cur_tag_info.get(ner_cont, [])
+    #         cur_cont_info.append([start_txt, end_txt - 1])
+    #         cur_tag_info[ner_cont] = cur_cont_info
+    #         label_info[cur_tag] = cur_tag_info
+    #     elif label.startswith('O'):
+    #         is_tag = False
             
     return {'id': id, 'label': label_info}
             
@@ -104,7 +106,7 @@ def main():
     bert_cfg = readjson(os.path.join(bert_cfg_path, 'bert_config.json'))
     max_len = 64 # bert_cfg.get('max_position_embeddings')
     dim_embedding = bert_cfg.get('hidden_size')
-    batch_size = 50
+    batch_size = 70
     epochs = 6
     number_layer = 1
     d_model = 768 
@@ -160,7 +162,7 @@ def main():
     res = sorted(res, key=lambda x: x['id'])
     writejson(res, './cache/predict.json')
     
-    from transformers.tokenization_bert import BertTokenizer
+    
         
         
     

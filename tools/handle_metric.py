@@ -33,5 +33,5 @@ if __name__ == "__main__":
     for t in txt:
         t = json.loads(t[t.index('Folder: ') + 8:].replace("'", '"'))
         data.append(handle_data(t))
-    write_excel(data, 'cache/test.xls')
+    write_excel(data, 'cache/metric.xls')
     print('finish')
