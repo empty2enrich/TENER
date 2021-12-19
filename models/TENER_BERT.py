@@ -52,8 +52,7 @@ class TENER(nn.Module):
         self.fc_dropout = nn.Dropout(fc_dropout)
         self.out_fc = nn.Linear(d_model, len(tag_vocab))
 
-        # todo: 测试下不用 encoder，完了就删了
-        self.out_fc2 = nn.Linear(embed_size, len(tag_vocab))
+       
 
         trans = allowed_transitions(tag_vocab, include_start_end=True)
         self.crf = ConditionalRandomField(len(tag_vocab), include_start_end_trans=True, allowed_transitions=trans)
@@ -67,17 +66,13 @@ class TENER(nn.Module):
         #     bigrams = self.bi_embed(bigrams)
         #     chars = torch.cat([chars, bigrams], dim=-1)
 
-        # todo: 测试暂时注掉
-        # chars = self.in_fc(chars)
-        # chars = self.transformer(chars, mask)
+        chars = self.in_fc(chars)
+        chars = self.transformer(chars, mask)
 
         chars = self.fc_dropout(chars)
         
-        # todo: 注释暂时注释
-        # chars = self.out_fc(chars)
+        chars = self.out_fc(chars)
         
-        # todo: 测试完删掉
-        chars = self.out_fc2(chars)
         
         logits = F.log_softmax(chars, dim=-1)
         if target is None:

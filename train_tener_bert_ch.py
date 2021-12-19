@@ -65,17 +65,25 @@ def main():
     tags_path = os.path.join(data_dir, 'tags.json')
     bert_cfg_path = './resources/bert_model/bert'
     bert_cfg = readjson(os.path.join(bert_cfg_path, 'bert_config.json'))
-    max_len = bert_cfg.get('max_position_embeddings')
+    max_len = 64 # bert_cfg.get('max_position_embeddings')
     dim_embedding = bert_cfg.get('hidden_size')
-    batch_size = 4
-    epochs = 5
-    number_layer = 5
-    d_model = 512
+    batch_size = 50
+    epochs = 6
+    number_layer = 1
+    d_model = 768 
     heads_num = 8
     dim_feedforward = 2048
     dropout = 0.90
     warmup = 100
     lr = 3e-5
+    bert_lr = 3e-5
+    other_lr = 1e-3
+    weight_decay_bert = 0.0
+    weight_decay_other = 0.0
+
+    use_fp16 = False
+    max_grad_norm = 100
+    
     device = 'cuda'
     dir_saved_model = './cache/model/'
     
@@ -98,14 +106,48 @@ def main():
     model = TENER(tags_mapping, bert_cfg_path, dim_embedding, number_layer, d_model, heads_num, dim_feedforward,
                   dropout).to(device)
     
-    opt = torch.optim.AdamW([p for p in model.parameters() if p.requires_grad==True], lr=lr)
+    
+    # 优化器
+    no_decay = ['bias', 'LayerNorm.weight']
+    bert_param = [(n,p) for n,p in model.bert.named_parameters() if p.requires_grad==True]
+    other_param = [(n, p) for n,p in list(model.named_parameters()) if not n.startswith('bert') and p.requires_grad==True]
+    
+    optizer_grouped_param = []
+    for param, cur_lr, cur_decay in zip([bert_param, other_param], [bert_lr, other_lr], [weight_decay_bert, weight_decay_other]):
+        optizer_grouped_param.append({
+            'params': [p for n, p in param if not any([nd in n for nd in no_decay])],
+            'lr': cur_lr, 'weight_decay': cur_decay}
+                                     )
+        optizer_grouped_param.append({
+            'params': [p for n, p in param if any([nd in n for nd in no_decay ])],
+            'lr': cur_lr, 'weight_decay': 0.0
+        })
+        
+    
+    opt = torch.optim.AdamW(optizer_grouped_param, lr=lr)
+    
+    def fix_bn(m):
+        classname = m.__class__.__name__
+        if classname.find('BatchNorm') != -1:
+            m.eval().half()
+      
+    if use_fp16:
+        try:
+            from apex import amp
+            from apex.fp16_utils import network_to_half
+        except ImportError:
+            raise ImportError("Please install apex from https://www.github.com/nvidia/apex to use fp16 training.")
+        model, opt = amp.initialize(model, opt)
+        network_to_half(model)
+        model.apply(fix_bn)
+    
     # torch.optim
     losses = []
     for folder, (train_data, test_data) in enumerate(get_k_folder_dataloder(data_paths, bert_cfg_path, tags_path, max_len, split_label, batch_size, cache_dir)):
         # 全训练机器太慢，只训练部分。
         if folder > 0:
             break
-        scheduler = get_linear_warmup_2(opt, warmup, len(train_data) * epochs)
+        scheduler = get_linear_warmup(opt, warmup, len(train_data) * epochs)
         for epoch in range(epochs):
             model.train()
             for step, (input_idx, label_idx, segments, mask) in tqdm(enumerate(train_data)):
@@ -116,6 +158,12 @@ def main():
                 visual_tensorboard(log_dir_tsbd, f'train {folder} folder', {'loss': [loss.item()]}, epoch, step)
                 losses.append(loss.item())
                 loss.backward()
+                
+                if use_fp16:
+                    torch.nn.utils.clip_grad_norm_(amp.master_params(opt), max_grad_norm)
+                else:
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
+                    
                 opt.step()
                 scheduler.step()
                 logger.info(f'epoch: {epoch}, {folder} Folder, Step: {step}, loss: {loss.item()}')
