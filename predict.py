@@ -97,7 +97,7 @@ def generate_res(id, label_pre, tokens, txt, idx_tranf):
 
 def main():
     test_path = 'resources/dataset/cluener/test.json'
-    model_saved = './cache/model/tener_weight_0_4.pkl'
+    model_saved = './cache/model/效果不错的/tener_weight_head64_0_3.pkl'
     
     data_dir = './resources/dataset/cluener/'
     cache_dir = './cache'
@@ -110,7 +110,7 @@ def main():
     epochs = 6
     number_layer = 1
     d_model = 768 
-    heads_num = 8
+    heads_num = 64
     dim_feedforward = 2048
     dropout = 0.90
     warmup = 100
