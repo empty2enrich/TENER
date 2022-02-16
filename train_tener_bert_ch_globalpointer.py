@@ -4,7 +4,7 @@
 #
 # cython: language_level=3
 
-from functools import cache
+# from functools import cache
 import logging
 import os
 from numpy import mod, number
@@ -19,6 +19,7 @@ from my_py_toolkit.file.file_toolkit import readjson, make_path_legal
 from my_py_toolkit.data_visulization.tensorboard import visual_data, visual_tensorboard
 from my_py_toolkit.log.logger import get_logger
 from models.TENER_BERT_globalpointer import TENER
+from models.utils import f1_globalpointer, predict_globalpointer
 from seqeval.metrics import classification_report
 
 from torch.optim.lr_scheduler import LambdaLR
@@ -61,7 +62,7 @@ def get_metric(report):
 def main():
     data_dir = './resources/dataset/cluener/'
     cache_dir = './cache'
-    tags_path = os.path.join(data_dir, 'tags.json')
+    tags_path = os.path.join(data_dir, 'tags_globalpointer.json')
     bert_cfg_path = './resources/bert_model/bert'
     bert_cfg = readjson(os.path.join(bert_cfg_path, 'bert_config.json'))
     max_len = 64 # bert_cfg.get('max_position_embeddings')
@@ -83,7 +84,7 @@ def main():
     use_fp16 = False
     max_grad_norm = 100
     
-    device = 'cuda'
+    device = 'cpu'
     dir_saved_model = './cache/model/'
     
     log_dir_tsbd = '../log/tener_log/'
@@ -92,6 +93,8 @@ def main():
     
     split_label = True
     
+    debug = True
+
     tags = readjson(tags_path)
     tags_mapping = {idx:tag for idx, tag in enumerate(readjson(tags_path)) } 
     
@@ -142,7 +145,7 @@ def main():
     
     # torch.optim
     losses = []
-    for folder, (train_data, test_data) in enumerate(get_k_folder_dataloder(data_paths, bert_cfg_path, tags_path, max_len, split_label, batch_size, cache_dir)):
+    for folder, (train_data, test_data) in enumerate(get_k_folder_dataloder(data_paths, bert_cfg_path, tags_path, max_len, split_label, batch_size, cache_dir, 'global_pointer')):
         # 全训练机器太慢，只训练部分。
         if folder > 0:
             break
@@ -150,6 +153,8 @@ def main():
         for epoch in range(epochs):
             model.train()
             for step, (input_idx, label_idx, segments, mask) in tqdm(enumerate(train_data)):
+                if debug and step>5:
+                    break
                 input_idx, label_idx, segments = input_idx.to(device), label_idx.to(device), segments.to(device)
                 opt.zero_grad()
                 out = model(input_idx, label_idx, segments)
@@ -171,16 +176,21 @@ def main():
             
             
             model.eval()
-            label_true, label_pre = [], []
+            tp, tnfp, tptn = 0, 0, 0
             for step, (input_idx, label_idx, segments, _) in tqdm(enumerate(test_data)): 
+                if debug and step > 5:
+                    break
                 input_idx, label_idx, segments = input_idx.to(device), label_idx.to(device), segments.to(device)
-                out = model.predict(input_idx, segments)
-                l_pre = out.get('pred')
-                label_true.extend([convert_label_idx(l, tags_mapping) for l in label_idx.tolist()])
-                label_pre.extend([convert_label_idx(l, tags_mapping) for l in l_pre.tolist()])
-            report = classification_report(label_true, label_pre, output_dict=True)
-            logger.info(f'epoch: {epoch}, {folder} Folder: ' + str(report))
-            visual_tensorboard(log_dir_tsbd, f'test_{folder} folder', get_metric(report), 1, epoch)
+                out = model(input_idx, segments)
+                out = out.greater(0)
+                tp += (label_idx * out).sum().item()
+                tnfp += label_idx.sum().item() + out.sum().item()
+                tptn += out.sum().item()
+            
+            f1_avg = 2* tp/tnfp
+            em_avg = tp/tptn
+            logger.info(f'epoch: {epoch}, {folder} Folder: em: {em_avg}, f1:{f1}')
+            visual_tensorboard(log_dir_tsbd, f'test_{folder} folder', {'em':[em_avg], 'f1':[f1_avg]}, 1, epoch)
             
             
             

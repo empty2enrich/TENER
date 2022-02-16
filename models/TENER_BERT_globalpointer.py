@@ -10,9 +10,9 @@
 
 
 import torch
-from curses import noecho
+# from curses import noecho
 from fastNLP.modules import ConditionalRandomField, allowed_transitions
-from models.utils import f1_globalpointer, global_pointer_loss
+from .utils import f1_globalpointer, global_pointer_loss
 from modules.transformer import TransformerEncoder
 
 from torch import nn

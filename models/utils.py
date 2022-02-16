@@ -7,7 +7,7 @@
 # sin 位置编码
 
 import torch
-from my_py_toolkit.torch.transformers_pkg import gen_pos_emb
+from my_py_toolkit.torch.transformer_utils import gen_pos_emb
 from my_py_toolkit.torch.tensor_toolkit import mask
 
 def rope(inputs):
@@ -43,6 +43,11 @@ def f1_globalpointer(y_true, y_pre):
     y_pre = y_pre.greater(0)
     return 2 * (y_true * y_pre).sum() / (y_true.sum() + y_pre.sum())
 
+
+def em_globalpoiter(y_true, y_pre):
+    y_pre = y_pre.greater(0)
+    return (y_true * y_pre).sum()/ y_pre.sum()    
+
 def predict_globalpointer(y_pre, tags):
     res = [{}] * y_pre.shape[0]
     idx = (y_pre>0).nonzero()
@@ -51,3 +56,4 @@ def predict_globalpointer(y_pre, tags):
             res[b][tags[tag_idx]] = []
         res[b][tags[tag_idx]].append((start, end))
     return res
+
