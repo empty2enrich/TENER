@@ -7,7 +7,9 @@
 # cython: language_level=3
 
 import collections
+# from curses import endwin, noecho
 import json
+import numpy as np
 import os
 import torch
 
@@ -128,7 +130,40 @@ def conv2tok_lab_pair(source, labels, tokenizer, split_label=False):
         else:
             pairs.append((tokens, labels_tokens))
     return pairs
-                
+
+
+@fn_timer()
+def conv2tok_lab_pair_globalpointer(source, labels, tokenizer, tags_mapping):
+    """
+    将数据转换为 (token, label) 对。
+
+    Args:
+        source (list(str)): 原文本
+        labels (list(dict{label: [(start, end)]})): 原数据 label。scope 包含 end。
+        tokenizer (Tokenizer): 对文本进行 tokenize 操作的类。
+        split_label(bool): 是否拆分 label, 如: name 拆为: B-NAME, I-NAME, E-NAME.
+    
+    Return:
+        (list((tokens, label))): 返回 source 中每个 txt 的 token 与 label 对。
+    """
+    pairs = []
+    for txt, label_detail in zip(source, labels):
+        tokens, idx_tranfer = tokenize_chinese(tokenizer, txt, True)
+        labels_tokens = np.zeros((len(tags_mapping), len(tokens), len(tokens))).tolist()
+        is_valid = True
+        for name_label, scopes in label_detail.items():
+            if not all([check_token_label(s, idx_tranfer) for s in scopes]):
+                is_valid = False
+                break
+            for start, end in scopes:
+                start_token, end_token = idx_tranfer.to_new(start), idx_tranfer.to_new(end)
+                labels_tokens[tags_mapping[name_label.upper()]][start_token][end_token - 1] = 1
+        if not is_valid:
+            print(f"Label error: ==================\ntxt: {txt}, label：{label_detail}")
+        else:
+            pairs.append((tokens, labels_tokens))
+    return pairs
+
 #
 @fn_timer() 
 def convert_features(pairs, max_len, tags_mapping, tokenizer):
@@ -165,10 +200,49 @@ def convert_features(pairs, max_len, tags_mapping, tokenizer):
         mask.append(cur_mask)
     
     return inputs_idx, labels_idx, segments, mask
+
+
+@fn_timer() 
+def convert_features_globalpointer(pairs, max_len, tags_mapping, tokenizer):
+    """
+    转换为模型输入。
+
+    Args:
+        pairs (list(tuple)): [description]
+        max_len (int): [description]
+        tags_mapping (dict): [description]
+        tokenizer (Tokenizer): [description]
+
+    Returns:
+        tuple: inputs_idx, labels_idx, segments, mask
+    """
+    inputs_idx = []
+    segments = []
+    labels_idx = []
+    mask = []
+    
+    for tokens, labels in pairs:
+        tokens = ['[CLS]'] + tokens[:max_len - 2] + ['[SEP]']
+        end = min(max_len -2, len(labels))
+        labels_tmp = np.zeros((len(tags_mapping), max_len, max_len))
+        labels_tmp[:, 1: end + 1, 1:end+1] = np.array(labels)[:, 0: end, 0:end]
+        labels = labels_tmp.tolist()        
+        segment = [0] * max_len
+        cur_mask = [1] * len(tokens)
+        tokens +=  ['[PAD]'] * (max_len - len(tokens))
+        cur_mask += [0] * (max_len - len(cur_mask))
         
+        inputs_idx.append(tokenizer.convert_tokens_to_ids(tokens))
+        segments.append(segment)
+        labels_idx.append(labels)
+        mask.append(cur_mask)
+    
+    return inputs_idx, labels_idx, segments, mask
+        
+
 @fn_timer()        
 def get_k_folder_dataloder(data_paths, bert_cfg, tags_path, max_len, split_label,
-                         batch_size, cache_dir):
+                         batch_size, cache_dir, model=None):
     """
     返回 k 折校验每次返回的数据。
 
@@ -180,6 +254,7 @@ def get_k_folder_dataloder(data_paths, bert_cfg, tags_path, max_len, split_label
         split_label ([type]): [description]
         batch_size ([type]): [description]
         cache_dir ([type]): [description]
+        model(str): None or globalpointer
 
     Yields:
         [type]: [description]
@@ -203,7 +278,10 @@ def get_k_folder_dataloder(data_paths, bert_cfg, tags_path, max_len, split_label
             cur = json.loads(line)
             source.append(cur['text'])    
             labels.append(cur['label'])
-        pairs = conv2tok_lab_pair(source, handle_labels(labels), tokenizer, split_label)
+        if model == 'global_pointer':
+            pairs = conv2tok_lab_pair_globalpointer(source, handle_labels(labels), tokenizer, tags_mapping)
+        else:
+            pairs = conv2tok_lab_pair(source, handle_labels(labels), tokenizer, split_label)
         writejson(pairs, os.path.join(cache_dir, 'pairs.json'))
     
     # 得到模型输入数据
@@ -213,7 +291,10 @@ def get_k_folder_dataloder(data_paths, bert_cfg, tags_path, max_len, split_label
         segments = readjson(os.path.join(cache_dir, 'segments.json'))
         mask = readjson(os.path.join(cache_dir, 'mask.json'))
     else:
-        inputs_idx, labels_idx, segments, mask = convert_features(pairs, max_len, tags_mapping, tokenizer)
+        if model == 'global_pointer':
+            inputs_idx, labels_idx, segments, mask = convert_features_globalpointer(pairs, max_len, tags_mapping, tokenizer)
+        else:
+            inputs_idx, labels_idx, segments, mask = convert_features(pairs, max_len, tags_mapping, tokenizer)
         writejson(inputs_idx, os.path.join(cache_dir, 'inputs_idx.json'))
         writejson(labels_idx, os.path.join(cache_dir, 'labels_idx.json'))
         writejson(segments, os.path.join(cache_dir, 'segments.json'))
