@@ -29,7 +29,7 @@ class TENER(nn.Module):
     def __init__(self, tag_vocab, bert_cfg, dim_embedding, num_layers, d_model, n_head, feedforward_dim, dropout,
                  after_norm=True, attn_type='adatrans',  
                  # bi_embed=None,
-                 fc_dropout=0.3, pos_embed=None, scale=False, dropout_attn=None):
+                 fc_dropout=0.3, pos_embed=None, scale=False, dropout_attn=None, gp_head_size=64):
         """
 
         :param tag_vocab: fastNLP Vocabulary, ner 的 label
@@ -65,13 +65,13 @@ class TENER(nn.Module):
         self.out_fc = nn.Linear(d_model, len(tag_vocab))
 
        
-        self.global_pointer = EfficientGlobalPointer(len(tag_vocab), d_model)
+        self.global_pointer = EfficientGlobalPointer(len(tag_vocab), gp_head_size, d_model)
         # trans = allowed_transitions(tag_vocab, include_start_end=True)
         # self.crf = ConditionalRandomField(len(tag_vocab), include_start_end_trans=True, allowed_transitions=trans)
 
 
     def _forward(self, inputs_idx, target, segments, bigrams=None):
-        mask_tensor = inputs_idx.ne(0)
+        mask_tensor = inputs_idx.ne(0).to(int)
         chars, _ = self.bert(inputs_idx, segments)
         # chars = self.embed(chars)
         # if self.bi_embed is not None:
@@ -83,7 +83,7 @@ class TENER(nn.Module):
 
         chars = self.fc_dropout(chars)
         
-        chars = self.out_fc(chars)
+        # chars = self.out_fc(chars)
         
         chars = self.global_pointer(chars, mask_tensor)
         if target is None:

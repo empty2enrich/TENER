@@ -7,19 +7,58 @@
 # cython: language_level=3
 
 import collections
+from inspect import getmembers
+# from functools import cache
 # from curses import endwin, noecho
 import json
+from operator import mod
 import numpy as np
 import os
+import random
+import sys
+from sklearn.utils import shuffle
 import torch
 
-from my_py_toolkit.file.file_toolkit import read_file, readjson, writejson
+from my_py_toolkit.file.file_toolkit import read_file, readjson, writejson,  get_file_paths
 from my_py_toolkit.ml.data.text_preprocess import tokenize_chinese
 from my_py_toolkit.torch.transformers_pkg import bert_tokenize, load_bert
 from my_py_toolkit.torch.utils import get_k_folder
 from my_py_toolkit.decorator.decorator import fn_timer
 
-from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.data import DataLoader, TensorDataset, IterableDataset
+
+############################################################  可加入 toolkit
+
+class FileDataset(IterableDataset):
+    def __init__(self, paths, shuffle=False, valid_len=4):
+        super().__init__()
+        self.paths = paths
+        self.shuffle = shuffle
+        self.valid_len = valid_len
+        self.size = 0
+        for p in self.paths:
+            self.size += len(readjson(p)[0])
+        
+    
+    def __iter__(self):
+        for p in self.paths:
+            datas = readjson(p)
+            if self.valid_len > 0:
+                datas[:self.valid_len] = [torch.tensor(item, dtype=torch.long) for item in datas[:self.valid_len]]
+            idx = list(range(len(datas[0])))
+            if self.shuffle:
+                random.shuffle(idx)
+            for i in idx:
+                yield [item[i] for item in datas]
+
+    def __len__(self):
+        return self.size
+
+def get_memory(object, unit='B'):
+    scale = {'B': 1, 'KB': 1024, 'MB': 1024**2, 'GB':1024**3}
+    return sys.getsizeof(object) / scale[unit]
+
+#################################################################################
 
 # 处理 label
 @fn_timer()
@@ -133,7 +172,7 @@ def conv2tok_lab_pair(source, labels, tokenizer, split_label=False):
 
 
 @fn_timer()
-def conv2tok_lab_pair_globalpointer(source, labels, tokenizer, tags_mapping):
+def conv2tok_lab_pair_globalpointer(source, labels, tokenizer, tags_mapping, size_save=100, cache_dir='./cache', file_name='pairs.json', data_type='trian', limit_data=-1):
     """
     将数据转换为 (token, label) 对。
 
@@ -147,10 +186,14 @@ def conv2tok_lab_pair_globalpointer(source, labels, tokenizer, tags_mapping):
         (list((tokens, label))): 返回 source 中每个 txt 的 token 与 label 对。
     """
     pairs = []
+    file_nums = 0
     for txt, label_detail in zip(source, labels):
+        if limit_data > 0 and len(pairs) > limit_data:
+            break
         tokens, idx_tranfer = tokenize_chinese(tokenizer, txt, True)
         labels_tokens = np.zeros((len(tags_mapping), len(tokens), len(tokens))).tolist()
         is_valid = True
+        # TODO : 对答案范围可进行优化（如：去掉两头的标点符号等）
         for name_label, scopes in label_detail.items():
             if not all([check_token_label(s, idx_tranfer) for s in scopes]):
                 is_valid = False
@@ -161,8 +204,17 @@ def conv2tok_lab_pair_globalpointer(source, labels, tokenizer, tags_mapping):
         if not is_valid:
             print(f"Label error: ==================\ntxt: {txt}, label：{label_detail}")
         else:
-            pairs.append((tokens, labels_tokens))
-    return pairs
+            pairs.append((tokens, labels_tokens, txt, json.dumps(label_detail, ensure_ascii=False), 
+            json.dumps(idx_tranfer.ori2new_idx), json.dumps(idx_tranfer.new2ori_idx)))
+        if get_memory(pairs, 'MB') > size_save:
+            writejson(pairs, os.path.join(cache_dir, f'{file_name}_{data_type}_{file_nums}'))
+            pairs = []
+            file_nums += 1
+    if pairs:
+        writejson(pairs, os.path.join(cache_dir, f'{file_name}_{data_type}_{file_nums}'))
+        pairs = []
+        file_nums += 1
+    return [os.path.join(cache_dir,  f'{file_name}_{data_type}_{i}') for i in range(file_nums)]
 
 #
 @fn_timer() 
@@ -203,7 +255,7 @@ def convert_features(pairs, max_len, tags_mapping, tokenizer):
 
 
 @fn_timer() 
-def convert_features_globalpointer(pairs, max_len, tags_mapping, tokenizer):
+def convert_features_globalpointer(pairs_paths, max_len, tags_mapping, tokenizer, size_save=100, cache_dir='./cache', file_name='features.json', data_type='train', limit_data=-1):
     """
     转换为模型输入。
 
@@ -220,29 +272,59 @@ def convert_features_globalpointer(pairs, max_len, tags_mapping, tokenizer):
     segments = []
     labels_idx = []
     mask = []
-    
-    for tokens, labels in pairs:
-        tokens = ['[CLS]'] + tokens[:max_len - 2] + ['[SEP]']
-        end = min(max_len -2, len(labels))
-        labels_tmp = np.zeros((len(tags_mapping), max_len, max_len))
-        labels_tmp[:, 1: end + 1, 1:end+1] = np.array(labels)[:, 0: end, 0:end]
-        labels = labels_tmp.tolist()        
-        segment = [0] * max_len
-        cur_mask = [1] * len(tokens)
-        tokens +=  ['[PAD]'] * (max_len - len(tokens))
-        cur_mask += [0] * (max_len - len(cur_mask))
-        
-        inputs_idx.append(tokenizer.convert_tokens_to_ids(tokens))
-        segments.append(segment)
-        labels_idx.append(labels)
-        mask.append(cur_mask)
-    
-    return inputs_idx, labels_idx, segments, mask
+    txts = []
+    all_tokens = []
+    all_labels_detail = []
+    all_idx_ori2new = []
+    all_idx_new2ori = []
+    file_nums = 0
+    for p in pairs_paths:
+        if limit_data > 0 and len(inputs_idx) > limit_data:
+            break
+        pairs = readjson(p)
+        for tokens, labels, txt, labels_detail, ori2new_idx, new2ori_idx in pairs:
+            tokens = ['[CLS]'] + tokens[:max_len - 2] + ['[SEP]']
+            end = min(max_len -2, len(labels[0]))
+            labels_tmp = np.zeros((len(tags_mapping), max_len, max_len))
+            labels_tmp[:, 1: end + 1, 1:end+1] = np.array(labels)[:, 0: end, 0:end]
+            labels = labels_tmp.tolist()        
+            segment = [0] * max_len
+            cur_mask = [1] * len(tokens)
+            tokens +=  ['[PAD]'] * (max_len - len(tokens))
+            cur_mask += [0] * (max_len - len(cur_mask))
+            
+            inputs_idx.append(tokenizer.convert_tokens_to_ids(tokens))
+            segments.append(segment)
+            labels_idx.append(labels)
+            mask.append(cur_mask)
+            txts.append(txt)
+            all_tokens.append(tokens)
+            all_labels_detail.append(labels_detail)
+            all_idx_ori2new.append(ori2new_idx)
+            all_idx_new2ori.append(new2ori_idx)
+
+            if get_memory([inputs_idx, segments, labels_idx, mask, txts, all_tokens, all_labels_detail, all_idx_ori2new, all_idx_new2ori], 'MB') > size_save:
+                writejson([inputs_idx, segments, labels_idx, mask, txts, all_tokens, all_labels_detail, all_idx_ori2new, all_idx_new2ori], os.path.join(cache_dir, file_name + f'_{data_type}_{file_nums}' ))
+                inputs_idx = []
+                segments = []
+                labels_idx = []
+                mask = []
+                txts = []
+                all_tokens = []
+                all_labels_detail = []
+                all_idx_ori2new = []
+                all_idx_new2ori = []
+                file_nums += 1
+    if inputs_idx:
+                writejson([inputs_idx, segments, labels_idx, mask, txts, all_tokens, all_labels_detail, all_idx_ori2new, all_idx_new2ori], os.path.join(cache_dir, file_name + f'_{data_type}_{file_nums}'))
+                
+                file_nums += 1
+    return [os.path.join(cache_dir, file_name + f'_{data_type}_{i}') for i in range(file_nums)]
         
 
 @fn_timer()        
 def get_k_folder_dataloder(data_paths, bert_cfg, tags_path, max_len, split_label,
-                         batch_size, cache_dir, model=None):
+                         batch_size, cache_dir, model=None, size_save=100, features_path='features.json'):
     """
     返回 k 折校验每次返回的数据。
 
@@ -292,18 +374,78 @@ def get_k_folder_dataloder(data_paths, bert_cfg, tags_path, max_len, split_label
         mask = readjson(os.path.join(cache_dir, 'mask.json'))
     else:
         if model == 'global_pointer':
-            inputs_idx, labels_idx, segments, mask = convert_features_globalpointer(pairs, max_len, tags_mapping, tokenizer)
+            features_paths = convert_features_globalpointer(pairs, max_len, tags_mapping, tokenizer, size_save, cache_dir, features_path)
+            return features_paths
         else:
             inputs_idx, labels_idx, segments, mask = convert_features(pairs, max_len, tags_mapping, tokenizer)
-        writejson(inputs_idx, os.path.join(cache_dir, 'inputs_idx.json'))
-        writejson(labels_idx, os.path.join(cache_dir, 'labels_idx.json'))
-        writejson(segments, os.path.join(cache_dir, 'segments.json'))
-        writejson(mask, os.path.join(cache_dir, 'mask.json'))
+            writejson(inputs_idx, os.path.join(cache_dir, 'inputs_idx.json'))
+            writejson(labels_idx, os.path.join(cache_dir, 'labels_idx.json'))
+            writejson(segments, os.path.join(cache_dir, 'segments.json'))
+            writejson(mask, os.path.join(cache_dir, 'mask.json'))
     
-    for train_d, test_d in get_k_folder(inputs_idx, labels_idx, segments, mask, k=5):
-        train_dataloader = DataLoader(TensorDataset(*[torch.tensor(d, dtype=torch.long) for d in train_d]), batch_size=batch_size, shuffle=True)
-        test_dataloader = DataLoader(TensorDataset(*[torch.tensor(d, dtype=torch.long) for d in test_d]), batch_size=batch_size, shuffle=True)
-        yield train_dataloader, test_dataloader
+            for train_d, test_d in get_k_folder(inputs_idx, labels_idx, segments, mask, k=5):
+                train_dataloader = DataLoader(TensorDataset(*[torch.tensor(d, dtype=torch.long) for d in train_d]), batch_size=batch_size, shuffle=True)
+                test_dataloader = DataLoader(TensorDataset(*[torch.tensor(d, dtype=torch.long) for d in test_d]), batch_size=batch_size, shuffle=True)
+                yield train_dataloader, test_dataloader
         
+def get_dataloader_file(data_paths, bert_cfg, tags_path, max_len, split_label,
+                         batch_size, cache_dir, model=None, size_save=100, features_path='features.json', shuffle=True, data_type='train', limit_data=-1, valid_len=4):
+    """处理数据量较大,存多个文件，不能直接加载到内存的数据 """
+    pairs = None
+    tokenizer = bert_tokenize(bert_cfg)
+    inputs_idx, labels_idx, segments, mask = None, None, None, None
+    
+    tags_mapping = {label:i for i, label in enumerate(readjson(tags_path))}
+    
+    # 得到 token, label 对。
+    
+    if os.path.exists(os.path.join(cache_dir, f'pairs.json_{data_type}_0')):
+        pairs_paths = []
+        for p in get_file_paths(cache_dir):
+            if 'pairs.json' in p:
+                pairs_paths.append(p)
+    else:
+        source, labels = [], []
+        datas = []
+        for p in data_paths:
+           datas.extend(read_file(p, '\n'))
+        datas = [d for d in datas if d]
+        for line in datas:
+            cur = json.loads(line)
+            source.append(cur['text'])    
+            labels.append(cur['label'])
+        if model == 'global_pointer':
+            pairs_paths = conv2tok_lab_pair_globalpointer(source, handle_labels(labels), tokenizer, tags_mapping, size_save, cache_dir, 'pairs.json', data_type, limit_data)
+        else:
+            pass
+        
+    
+    # 得到模型输入数据
+    if model == 'global_pointer':
+        features_paths = []
+        if os.path.exists(os.path.join(cache_dir, f'{features_path}_{data_type}_0')):
+            for p in get_file_paths(cache_dir):
+                if features_path in p:
+                    features_paths.append(p)
+        else:
+            features_paths = convert_features_globalpointer(pairs_paths, max_len, tags_mapping, tokenizer, size_save, cache_dir, features_path, data_type, limit_data)
+        return DataLoader(FileDataset(features_paths, shuffle, valid_len=valid_len), batch_size=batch_size)
+        # todo : Dataset
+    else:
+        print('未指定数据处理方法')
+        pass
+        # if model == 'global_pointer':
+        #     pass
+        # else:
+        #     inputs_idx, labels_idx, segments, mask = convert_features(pairs, max_len, tags_mapping, tokenizer)
+        #     writejson(inputs_idx, os.path.join(cache_dir, 'inputs_idx.json'))
+        #     writejson(labels_idx, os.path.join(cache_dir, 'labels_idx.json'))
+        #     writejson(segments, os.path.join(cache_dir, 'segments.json'))
+        #     writejson(mask, os.path.join(cache_dir, 'mask.json'))
+    
+        #     for train_d, test_d in get_k_folder(inputs_idx, labels_idx, segments, mask, k=5):
+        #         train_dataloader = DataLoader(TensorDataset(*[torch.tensor(d, dtype=torch.long) for d in train_d]), batch_size=batch_size, shuffle=True)
+        #         test_dataloader = DataLoader(TensorDataset(*[torch.tensor(d, dtype=torch.long) for d in test_d]), batch_size=batch_size, shuffle=True)
+        #         yield train_dataloader, test_dataloader
 
 
