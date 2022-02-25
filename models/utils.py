@@ -14,6 +14,7 @@ from my_py_toolkit.torch.tensor_toolkit import mask
 
 def rope(inputs):
     """rotary position embedding"""
+    device = inputs.device
     length, dim = inputs.shape[-2:]
     pos = gen_pos_emb(length, dim)
     inputs_2 = torch.zeros_like(inputs)
@@ -22,7 +23,7 @@ def rope(inputs):
     sin, cos = torch.zeros_like(pos), torch.zeros_like(pos)
     sin[:, ::2], sin[:, 1::2] = pos[:, ::2], pos[:, ::2]
     cos[:, ::2], cos[:, 1::2] = pos[:, 1::2], pos[:, 1::2]
-    return inputs * cos + inputs_2 * sin
+    return inputs * cos.to(device) + inputs_2 * sin.to(device)
 
 def multilabel_categorical_crossentropy(y_true, y_pre):
     y_pre = (1 - 2* y_true) * y_pre
