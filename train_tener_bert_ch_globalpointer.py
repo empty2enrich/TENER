@@ -5,8 +5,10 @@
 # cython: language_level=3
 
 # from functools import cache
+import json
 import logging
 import os
+from tkinter import N
 from numpy import mod, number
 from tqdm import tqdm
 import torch
@@ -14,12 +16,12 @@ from torch import optim
 from torch.nn.functional import dropout
 # from torch.optim.lr_scheduler import
 
-from data_preprocess.cluener import get_k_folder_dataloder
-from my_py_toolkit.file.file_toolkit import readjson, make_path_legal
+from data_preprocess.cluener import get_k_folder_dataloder, get_dataloader_file
+from my_py_toolkit.file.file_toolkit import readjson, make_path_legal, writejson
 from my_py_toolkit.data_visulization.tensorboard import visual_data, visual_tensorboard
 from my_py_toolkit.log.logger import get_logger
 from models.TENER_BERT_globalpointer import TENER
-from models.utils import f1_globalpointer, predict_globalpointer
+from models.utils import f1_globalpointer, predict_globalpointer, compare_res
 from seqeval.metrics import classification_report
 
 from torch.optim.lr_scheduler import LambdaLR
@@ -67,11 +69,13 @@ def main():
     bert_cfg = readjson(os.path.join(bert_cfg_path, 'bert_config.json'))
     max_len = 64 # bert_cfg.get('max_position_embeddings')
     dim_embedding = bert_cfg.get('hidden_size')
-    batch_size = 70
+    # debug:
+    batch_size = 2
     epochs = 6
     number_layer = 1
     d_model = 768 
     heads_num = 128      
+    gp_head_size = 64
     dim_feedforward = 2048
     dropout = 0.95
     warmup = 100
@@ -90,10 +94,12 @@ def main():
     log_dir_tsbd = '../log/tener_log/'
     log_dir = '../log/run.log'
     data_paths = [os.path.join(data_dir, 'train.json'), os.path.join(data_dir, 'dev.json')]
+    res_compare_path = 'res_compare.json'
     
     split_label = True
     
     debug = True
+    steps_debug = 1
 
     tags = readjson(tags_path)
     tags_mapping = {idx:tag for idx, tag in enumerate(readjson(tags_path)) } 
@@ -106,7 +112,7 @@ def main():
     # todo: 添加参数
     # todo: 加载模型可以写个封装方法
     model = TENER(tags_mapping, bert_cfg_path, dim_embedding, number_layer, d_model, heads_num, dim_feedforward,
-                  dropout).to(device)
+                  dropout, gp_head_size=gp_head_size).to(device)
     
     
     # 优化器
@@ -145,15 +151,17 @@ def main():
     
     # torch.optim
     losses = []
-    for folder, (train_data, test_data) in enumerate(get_k_folder_dataloder(data_paths, bert_cfg_path, tags_path, max_len, split_label, batch_size, cache_dir, 'global_pointer')):
+    train_data = get_dataloader_file([data_paths[0]], bert_cfg_path, tags_path, max_len, split_label, batch_size, cache_dir, 'global_pointer', 1, data_type='train', limit_data=30, valid_len=4)
+    test_data = get_dataloader_file([data_paths[1]], bert_cfg_path, tags_path, max_len, split_label, batch_size, cache_dir, 'global_pointer', 1, data_type='test', limit_data=10, valid_len=4)
+    for folder in range(1):
         # 全训练机器太慢，只训练部分。
         if folder > 0:
             break
         scheduler = get_linear_warmup(opt, warmup, len(train_data) * epochs)
         for epoch in range(epochs):
             model.train()
-            for step, (input_idx, label_idx, segments, mask) in tqdm(enumerate(train_data)):
-                if debug and step>5:
+            for step, (input_idx, segments, label_idx, mask, _, _, _, _, _) in tqdm(enumerate(train_data)):
+                if debug and step> steps_debug - 1:
                     break
                 input_idx, label_idx, segments = input_idx.to(device), label_idx.to(device), segments.to(device)
                 opt.zero_grad()
@@ -177,19 +185,24 @@ def main():
             
             model.eval()
             tp, tnfp, tptn = 0, 0, 0
-            for step, (input_idx, label_idx, segments, _) in tqdm(enumerate(test_data)): 
-                if debug and step > 5:
+            res_compare = []
+            for step, (input_idx, segments, label_idx, _, txt, tokens, labels_detail, ori2new_idx_str, new2ori_idx_str) in tqdm(enumerate(test_data)): 
+                if debug and step > steps_debug - 1:
                     break
                 input_idx, label_idx, segments = input_idx.to(device), label_idx.to(device), segments.to(device)
-                out = model(input_idx, segments)
+                out = model(input_idx, None, segments)
                 out = out.greater(0)
                 tp += (label_idx * out).sum().item()
                 tnfp += label_idx.sum().item() + out.sum().item()
                 tptn += out.sum().item()
+                print(tp, tnfp, tptn)
+                res_compare.extend(compare_res(out, label_idx, tags, txt, [json.loads(idxstr) for idxstr in new2ori_idx_str]))
+                
             
             f1_avg = 2* tp/tnfp
             em_avg = tp/tptn
-            logger.info(f'epoch: {epoch}, {folder} Folder: em: {em_avg}, f1:{f1}')
+            logger.info(f'epoch: {epoch}, {folder} Folder: em: {em_avg}, f1:{f1_avg}')
+            writejson(res_compare, os.path.join(cache_dir, res_compare_path))
             visual_tensorboard(log_dir_tsbd, f'test_{folder} folder', {'em':[em_avg], 'f1':[f1_avg]}, 1, epoch)
             
             

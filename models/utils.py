@@ -10,6 +10,8 @@ import torch
 from my_py_toolkit.torch.transformer_utils import gen_pos_emb
 from my_py_toolkit.torch.tensor_toolkit import mask
 
+################################ toolkit #######################################
+
 def rope(inputs):
     """rotary position embedding"""
     length, dim = inputs.shape[-2:]
@@ -57,3 +59,41 @@ def predict_globalpointer(y_pre, tags):
         res[b][tags[tag_idx]].append((start, end))
     return res
 
+def predict_globalpointer_compare(y_pre, tags):
+    res = [[] for _ in range(y_pre.shape[0])]
+    idx = (y_pre>0).nonzero()
+    for b, tag_idx, start, end in idx.tolist():
+        res[b].append((tags[tag_idx], (start, end)))
+        
+    return res
+
+
+def compare_res(y_pre, y_true, tags, txts, new2ori_idxs):
+    y_pre = predict_globalpointer_compare(y_pre, tags)
+    y_true = predict_globalpointer_compare(y_true, tags)
+    res = []
+    for y_pre_cur, y_true_cur, txt, new2ori_idx in zip(y_pre, y_true, txts, new2ori_idxs):
+        y_pre_cur, y_true_cur = set(y_pre_cur), set(y_true_cur)
+        cur_res = {}
+        pre_res, true_res = [], []
+        for tag, (start, end) in y_pre_cur - y_true_cur:
+            # 减一原因：第一个 token 为 [CLS]
+            end = min(end - 1, len(new2ori_idx) - 1)
+            start_txt, end_txt = new2ori_idx[start - 1][0], new2ori_idx[end][1]
+            ner_txt = txt[start_txt:end_txt]
+            pre_res.append((tag, ner_txt, (start, end), (start_txt, end_txt)))
+        for tag, (start, end) in y_true_cur - y_pre_cur:
+            end = min(end - 1, len(new2ori_idx) - 1)
+            start_txt, end_txt = new2ori_idx[start - 1][0], new2ori_idx[end - 1][1]
+            ner_txt = txt[start_txt:end_txt]
+            true_res.append((tag, ner_txt, (start, end), (start_txt, end_txt)))
+        if pre_res:
+            cur_res['pre'] = pre_res
+        if true_res:
+            cur_res['true'] = pre_res
+        if cur_res:
+            cur_res['txt'] = txt
+        if cur_res:
+            res.append(cur_res)
+    return res
+    
