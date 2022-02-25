@@ -69,8 +69,7 @@ def main():
     bert_cfg = readjson(os.path.join(bert_cfg_path, 'bert_config.json'))
     max_len = 64 # bert_cfg.get('max_position_embeddings')
     dim_embedding = bert_cfg.get('hidden_size')
-    # debug:
-    batch_size = 2
+    batch_size = 70
     epochs = 6
     number_layer = 1
     d_model = 768 
@@ -88,7 +87,7 @@ def main():
     use_fp16 = False
     max_grad_norm = 100
     
-    device = 'cpu'
+    device = 'cuda'
     dir_saved_model = './cache/model/'
     
     log_dir_tsbd = '../log/tener_log/'
@@ -98,8 +97,12 @@ def main():
     
     split_label = True
     
+    # debug 参数
+
     debug = True
     steps_debug = 1
+    nums_train_data = 3000
+    nums_test_data = 1000
 
     tags = readjson(tags_path)
     tags_mapping = {idx:tag for idx, tag in enumerate(readjson(tags_path)) } 
@@ -151,8 +154,8 @@ def main():
     
     # torch.optim
     losses = []
-    train_data = get_dataloader_file([data_paths[0]], bert_cfg_path, tags_path, max_len, split_label, batch_size, cache_dir, 'global_pointer', 1, data_type='train', limit_data=30, valid_len=4)
-    test_data = get_dataloader_file([data_paths[1]], bert_cfg_path, tags_path, max_len, split_label, batch_size, cache_dir, 'global_pointer', 1, data_type='test', limit_data=10, valid_len=4)
+    train_data = get_dataloader_file([data_paths[0]], bert_cfg_path, tags_path, max_len, split_label, batch_size, cache_dir, 'global_pointer', 1, data_type='train', limit_data=nums_train_data, valid_len=4)
+    test_data = get_dataloader_file([data_paths[1]], bert_cfg_path, tags_path, max_len, split_label, batch_size, cache_dir, 'global_pointer', 1, data_type='test', limit_data=nums_test_data, valid_len=4)
     for folder in range(1):
         # 全训练机器太慢，只训练部分。
         if folder > 0:
@@ -202,7 +205,7 @@ def main():
             f1_avg = 2* tp/tnfp
             em_avg = tp/tptn
             logger.info(f'epoch: {epoch}, {folder} Folder: em: {em_avg}, f1:{f1_avg}')
-            writejson(res_compare, os.path.join(cache_dir, res_compare_path))
+            writejson(res_compare, os.path.join(cache_dir, res_compare_path + f'_{epoch}'))
             visual_tensorboard(log_dir_tsbd, f'test_{folder} folder', {'em':[em_avg], 'f1':[f1_avg]}, 1, epoch)
             
             
