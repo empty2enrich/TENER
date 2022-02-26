@@ -28,7 +28,7 @@ def rope(inputs):
 def multilabel_categorical_crossentropy(y_true, y_pre):
     y_pre = (1 - 2* y_true) * y_pre
     y_neg = mask(y_pre, y_true, -1, -10000)
-    y_pos = mask(y_pre, 1-y_true, -1, -10000)
+    y_pos = mask(- y_pre, 1 - y_true, -1, -10000)
     zero = torch.zeros_like(y_true[..., :1])
     y_neg = torch.cat([y_neg, zero], -1)
     y_pos = torch.cat([y_pos, zero], -1)
@@ -98,3 +98,39 @@ def compare_res(y_pre, y_true, tags, txts, new2ori_idxs):
             res.append(cur_res)
     return res
     
+
+def sparse_global_loss(y_true, y_pre):
+    """
+    y_true( batch_size, labes_num, 2)
+    y_pre(batch_size, labels_num, seq_len, seq_len)
+
+    """
+    batch_size, labels_num, seq_len, _ = y_pre.shape
+    y_true = y_true[..., :1] * seq_len + y_true[..., 1:]
+    y_pre = y_pre.reshape(batch_size, labels_num, -1)
+    return torch.mean(spare_multilable_categorical_crossentropy(y_true, y_pre, True).sum(1))
+
+def spare_multilable_categorical_crossentropy(y_true, y_pre, mask_zero=False, mask_value=-10000):
+    """
+    y_true(batch_size, labels_num, 1)
+    y_pre(batch_size, labels_num, seq_len * seq_len)
+    """
+    # device = y_pre.device
+    zeros = torch.zeros_like(y_true[..., :1])
+    y_pre = torch.cat([y_pre, zeros], -1)
+    if mask_zero:
+        y_pre[..., 0] = - mask_value
+
+    y_pos = y_pre.gather(-1, y_true)
+    y_pos_2 = torch.cat([ - y_pos, zeros], dim=-1)
+    loss_pos = torch.logsumexp(y_pos_2, -1)
+
+    if mask_zero:
+        y_pre[..., 0] = mask_value
+
+    loss_all = torch.logsumexp(y_pre, dim=-1)
+    y_pos_2 = y_pre.gather(-1, y_true)
+    loss_aux = torch.logsumexp(y_pos_2, dim=-1)
+    # 可能需要加一个 clip 操作
+    loss_neg = loss_all + torch.log(1 - torch.exp(loss_aux - loss_all))
+    return loss_pos + loss_neg
