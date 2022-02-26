@@ -103,7 +103,7 @@ def main():
     steps_debug = 1
     nums_train_data = -1
     nums_test_data = -1
-    size_split = 1000
+    size_split = 500
 
     tags = readjson(tags_path)
     tags_mapping = {idx:tag for idx, tag in enumerate(readjson(tags_path)) } 
