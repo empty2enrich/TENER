@@ -172,7 +172,7 @@ def conv2tok_lab_pair(source, labels, tokenizer, split_label=False):
 
 
 @fn_timer()
-def conv2tok_lab_pair_globalpointer(source, labels, tokenizer, tags_mapping, size_save=100, cache_dir='./cache', file_name='pairs.json', data_type='trian', limit_data=-1):
+def conv2tok_lab_pair_globalpointer(source, labels, tokenizer, tags_mapping, size_split=100, cache_dir='./cache', file_name='pairs.json', data_type='trian', limit_data=-1):
     """
     将数据转换为 (token, label) 对。
 
@@ -206,7 +206,7 @@ def conv2tok_lab_pair_globalpointer(source, labels, tokenizer, tags_mapping, siz
         else:
             pairs.append((tokens, labels_tokens, txt, json.dumps(label_detail, ensure_ascii=False), 
             json.dumps(idx_tranfer.ori2new_idx), json.dumps(idx_tranfer.new2ori_idx)))
-        if get_memory(pairs, 'MB') > size_save:
+        if size_split > 0 and len(pairs) > size_split:
             writejson(pairs, os.path.join(cache_dir, f'{file_name}_{data_type}_{file_nums}'))
             pairs = []
             file_nums += 1
@@ -255,7 +255,7 @@ def convert_features(pairs, max_len, tags_mapping, tokenizer):
 
 
 @fn_timer() 
-def convert_features_globalpointer(pairs_paths, max_len, tags_mapping, tokenizer, size_save=100, cache_dir='./cache', file_name='features.json', data_type='train', limit_data=-1):
+def convert_features_globalpointer(pairs_paths, max_len, tags_mapping, tokenizer, size_split=100, cache_dir='./cache', file_name='features.json', data_type='train', limit_data=-1):
     """
     转换为模型输入。
 
@@ -303,7 +303,7 @@ def convert_features_globalpointer(pairs_paths, max_len, tags_mapping, tokenizer
             all_idx_ori2new.append(ori2new_idx)
             all_idx_new2ori.append(new2ori_idx)
 
-            if get_memory([inputs_idx, segments, labels_idx, mask, txts, all_tokens, all_labels_detail, all_idx_ori2new, all_idx_new2ori], 'MB') > size_save:
+            if size_split > 0 and len(inputs_idx) > size_split:
                 writejson([inputs_idx, segments, labels_idx, mask, txts, all_tokens, all_labels_detail, all_idx_ori2new, all_idx_new2ori], os.path.join(cache_dir, file_name + f'_{data_type}_{file_nums}' ))
                 inputs_idx = []
                 segments = []
@@ -389,7 +389,7 @@ def get_k_folder_dataloder(data_paths, bert_cfg, tags_path, max_len, split_label
                 yield train_dataloader, test_dataloader
         
 def get_dataloader_file(data_paths, bert_cfg, tags_path, max_len, split_label,
-                         batch_size, cache_dir, model=None, size_save=100, features_path='features.json', shuffle=True, data_type='train', limit_data=-1, valid_len=4):
+                         batch_size, cache_dir, model=None, size_split=100, features_path='features.json', shuffle=True, data_type='train', limit_data=-1, valid_len=4):
     """处理数据量较大,存多个文件，不能直接加载到内存的数据 """
     pairs = None
     tokenizer = bert_tokenize(bert_cfg)
@@ -415,7 +415,7 @@ def get_dataloader_file(data_paths, bert_cfg, tags_path, max_len, split_label,
             source.append(cur['text'])    
             labels.append(cur['label'])
         if model == 'global_pointer':
-            pairs_paths = conv2tok_lab_pair_globalpointer(source, handle_labels(labels), tokenizer, tags_mapping, size_save, cache_dir, 'pairs.json', data_type, limit_data)
+            pairs_paths = conv2tok_lab_pair_globalpointer(source, handle_labels(labels), tokenizer, tags_mapping, size_split, cache_dir, 'pairs.json', data_type, limit_data)
         else:
             pass
         
@@ -428,7 +428,7 @@ def get_dataloader_file(data_paths, bert_cfg, tags_path, max_len, split_label,
                 if features_path in p:
                     features_paths.append(p)
         else:
-            features_paths = convert_features_globalpointer(pairs_paths, max_len, tags_mapping, tokenizer, size_save, cache_dir, features_path, data_type, limit_data)
+            features_paths = convert_features_globalpointer(pairs_paths, max_len, tags_mapping, tokenizer, size_split, cache_dir, features_path, data_type, limit_data)
         return DataLoader(FileDataset(features_paths, shuffle, valid_len=valid_len), batch_size=batch_size)
         # todo : Dataset
     else:

@@ -87,7 +87,7 @@ def main():
     use_fp16 = False
     max_grad_norm = 100
     
-    device = 'cuda'
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
     dir_saved_model = './cache/model/'
     
     log_dir_tsbd = '../log/tener_log/'
@@ -101,8 +101,9 @@ def main():
 
     debug = False
     steps_debug = 1
-    nums_train_data = 3000
-    nums_test_data = 1000
+    nums_train_data = -1
+    nums_test_data = -1
+    size_split = 1000
 
     tags = readjson(tags_path)
     tags_mapping = {idx:tag for idx, tag in enumerate(readjson(tags_path)) } 
@@ -154,8 +155,8 @@ def main():
     
     # torch.optim
     losses = []
-    train_data = get_dataloader_file([data_paths[0]], bert_cfg_path, tags_path, max_len, split_label, batch_size, cache_dir, 'global_pointer', 1, data_type='train', limit_data=nums_train_data, valid_len=4)
-    test_data = get_dataloader_file([data_paths[1]], bert_cfg_path, tags_path, max_len, split_label, batch_size, cache_dir, 'global_pointer', 1, data_type='test', limit_data=nums_test_data, valid_len=4)
+    train_data = get_dataloader_file([data_paths[0]], bert_cfg_path, tags_path, max_len, split_label, batch_size, cache_dir, 'global_pointer', size_split, data_type='train', limit_data=nums_train_data, valid_len=4)
+    test_data = get_dataloader_file([data_paths[1]], bert_cfg_path, tags_path, max_len, split_label, batch_size, cache_dir, 'global_pointer', size_split, data_type='test', limit_data=nums_test_data, valid_len=4)
     for folder in range(1):
         # 全训练机器太慢，只训练部分。
         if folder > 0:
