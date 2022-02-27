@@ -213,6 +213,8 @@ def conv2tok_lab_pair_globalpointer(source, labels, tokenizer, tags_mapping, siz
         if not is_valid:
             print(f"Label error: ==================\ntxt: {txt}, label：{label_detail}")
         else:
+            if sparse:
+                labels_tokens = [list(item) for item in labels_tokens]
             pairs.append((tokens, labels_tokens, txt, json.dumps(label_detail, ensure_ascii=False), 
             json.dumps(idx_tranfer.ori2new_idx), json.dumps(idx_tranfer.new2ori_idx)))
         if size_split > 0 and len(pairs) > size_split:
@@ -292,12 +294,23 @@ def convert_features_globalpointer(pairs_paths, max_len, tags_mapping, tokenizer
         if limit_data > 0 and len(inputs_idx) > limit_data:
             break
         pairs = readjson(p)
+        max_labels = 0
+        if sparse:
+            for item in pairs:
+                max_labels = max(max_labels, max([len(_) for _ in item[1]]))
         for tokens, labels, txt, labels_detail, ori2new_idx, new2ori_idx in pairs:
             tokens = ['[CLS]'] + tokens[:max_len - 2] + ['[SEP]']
             end = min(max_len -2, len(labels[0]))
-            labels_tmp = np.zeros((len(tags_mapping), max_len, max_len))
-            labels_tmp[:, 1: end + 1, 1:end+1] = np.array(labels)[:, 0: end, 0:end]
-            labels = labels_tmp.tolist()        
+            if sparse:
+                for i, item in enumerate(labels):
+                    item = [(s+1, e+1) for s,e in item]
+                    for _ in range(max_labels - len(item)):
+                        item.append((0, 0))
+                    labels[i] = item
+            else:
+                labels_tmp = np.zeros((len(tags_mapping), max_len, max_len))
+                labels_tmp[:, 1: end + 1, 1:end+1] = np.array(labels)[:, 0: end, 0:end]
+                labels = labels_tmp.tolist()        
             segment = [0] * max_len
             cur_mask = [1] * len(tokens)
             tokens +=  ['[PAD]'] * (max_len - len(tokens))

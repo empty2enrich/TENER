@@ -12,7 +12,7 @@
 import torch
 # from curses import noecho
 from fastNLP.modules import ConditionalRandomField, allowed_transitions
-from .utils import f1_globalpointer, global_pointer_loss
+from .utils import f1_globalpointer, global_pointer_loss, sparse_global_loss, f1_globalpointer_sparse
 from modules.transformer import TransformerEncoder
 
 from torch import nn
@@ -70,7 +70,7 @@ class TENER(nn.Module):
         # self.crf = ConditionalRandomField(len(tag_vocab), include_start_end_trans=True, allowed_transitions=trans)
 
 
-    def _forward(self, inputs_idx, target, segments, bigrams=None):
+    def _forward(self, inputs_idx, target, segments, sparse=False, bigrams=None):
         mask_tensor = inputs_idx.ne(0).to(int)
         chars, _ = self.bert(inputs_idx, segments)
         # chars = self.embed(chars)
@@ -89,8 +89,12 @@ class TENER(nn.Module):
         if target is None:
             return chars
         else:
-            loss = global_pointer_loss(target, chars)
-            f1 = f1_globalpointer(target, chars)
+            if sparse:
+                loss = sparse_global_loss(target, chars)
+                f1 = f1_globalpointer_sparse(target, chars)
+            else:
+                loss = global_pointer_loss(target, chars)
+                f1 = f1_globalpointer(target, chars)
             return {'loss': loss, 'f1': f1}
             
         

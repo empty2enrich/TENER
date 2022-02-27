@@ -42,14 +42,29 @@ def global_pointer_loss(y_true, y_pre):
     return torch.mean(multilabel_categorical_crossentropy(y_true, y_pre))
 
 
-def f1_globalpointer(y_true, y_pre):
-    y_pre = y_pre.greater(0)
-    return 2 * (y_true * y_pre).sum() / (y_true.sum() + y_pre.sum())
+# f1_globalpointer_sparse
+def f1_globalpointer_sparse(y_true, y_pre):
+    batch_size, labels_num, seq_len, _ = y_pre.shape
+    y_true = y_true[..., :1] * seq_len + y_true[..., 1:]
+    y_pre = y_pre.reshape(batch_size, labels_num, -1)
+    y_pre = (y_pre)>0
+
+    tp = y_pre.gather(-1, y_true).sum()
+    tpfp = y_pre.sum()
+    tpfn = (y_true > 0).sum()
+    return 2*tp / (tpfp + tpfn)
 
 
 def em_globalpoiter(y_true, y_pre):
     y_pre = y_pre.greater(0)
-    return (y_true * y_pre).sum()/ y_pre.sum()    
+    return (y_true * y_pre).sum()/ y_pre.sum()   
+
+# em_globalpointer_sparse
+def em_globalpointer_sparse(y_true, y_pre):
+    batch_size, labels_num, seq_len, _ = y_pre.shape
+    y_true = y_true[..., :1] * seq_len + y_true[..., 1:]
+    y_pre = y_pre.reshape(batch_size, labels_num, -1) > 0
+    return y_pre.gather(-1, y_true).sum() / y_pre.sum() 
 
 def predict_globalpointer(y_pre, tags):
     res = [{}] * y_pre.shape[0]

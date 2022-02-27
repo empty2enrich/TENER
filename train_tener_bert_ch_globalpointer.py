@@ -103,7 +103,8 @@ def main():
     steps_debug = 1
     nums_train_data = -1
     nums_test_data = -1
-    size_split = 500
+    size_split = -1
+    sparse = True
 
     tags = readjson(tags_path)
     tags_mapping = {idx:tag for idx, tag in enumerate(readjson(tags_path)) } 
@@ -155,8 +156,8 @@ def main():
     
     # torch.optim
     losses = []
-    train_data = get_dataloader_file([data_paths[0]], bert_cfg_path, tags_path, max_len, split_label, batch_size, cache_dir, 'global_pointer', size_split, data_type='train', limit_data=nums_train_data, valid_len=4)
-    test_data = get_dataloader_file([data_paths[1]], bert_cfg_path, tags_path, max_len, split_label, batch_size, cache_dir, 'global_pointer', size_split, data_type='test', limit_data=nums_test_data, valid_len=4)
+    train_data = get_dataloader_file([data_paths[0]], bert_cfg_path, tags_path, max_len, split_label, batch_size, cache_dir, 'global_pointer', size_split, data_type='train', limit_data=nums_train_data, valid_len=4, sparse=sparse)
+    test_data = get_dataloader_file([data_paths[1]], bert_cfg_path, tags_path, max_len, split_label, batch_size, cache_dir, 'global_pointer', size_split, data_type='test', limit_data=nums_test_data, valid_len=4, sparse=sparse)
     for folder in range(1):
         # 全训练机器太慢，只训练部分。
         if folder > 0:
@@ -169,7 +170,7 @@ def main():
                     break
                 input_idx, label_idx, segments = input_idx.to(device), label_idx.to(device), segments.to(device)
                 opt.zero_grad()
-                out = model(input_idx, label_idx, segments)
+                out = model(input_idx, label_idx, segments, sparse)
                 loss = out.get('loss')
                 f1 = out.get('f1')
                 visual_tensorboard(log_dir_tsbd, f'train {folder} folder', {'loss': [loss.item()], 'f1': [f1.item()]}, epoch, step)
@@ -194,12 +195,16 @@ def main():
                 if debug and step > steps_debug - 1:
                     break
                 input_idx, label_idx, segments = input_idx.to(device), label_idx.to(device), segments.to(device)
-                out = model(input_idx, None, segments)
+                out = model(input_idx, None, segments, sparse)
                 out = out.greater(0)
-                tp += (label_idx * out).sum().item()
-                tnfp += label_idx.sum().item() + out.sum().item()
-                tptn += out.sum().item()
-                print(tp, tnfp, tptn)
+                if sparse:
+                    # todo
+                    pass
+                else:
+                    tp += (label_idx * out).sum().item()
+                    tnfp += label_idx.sum().item() + out.sum().item()
+                    tptn += out.sum().item()
+                    print(tp, tnfp, tptn)
                 res_compare.extend(compare_res(out, label_idx, tags, txt, [json.loads(idxstr) for idxstr in new2ori_idx_str]))
                 
             
