@@ -41,30 +41,57 @@ def global_pointer_loss(y_true, y_pre):
     y_true = y_true.permute(0, 3, 1, 2).reshape(b*h, -1)
     return torch.mean(multilabel_categorical_crossentropy(y_true, y_pre))
 
+def f1_globalpointer(y_true, y_pre, tp_pre=None, tpfp_pre=None, tpfn_pre=None):
+    y_pre = y_pre.greater(0)
+    if tp_pre is None:
+        return 2 * (y_true * y_pre).sum() / (y_true.sum() + y_pre.sum())
+    else:
+        tp = (y_true * y_pre).sum() + tp_pre
+        tpfp = y_pre.sum() + tpfp_pre
+        tpfn = y_true.sum() + tpfn_pre
+        return 2 * tp / (tpfp + tpfn), tp, tpfp, tpfn
+
 
 # f1_globalpointer_sparse
-def f1_globalpointer_sparse(y_true, y_pre):
+def f1_globalpointer_sparse(y_true, y_pre, tp_pre=None, tpfp_pre=None, tpfn_pre=None):
     batch_size, labels_num, seq_len, _ = y_pre.shape
-    y_true = y_true[..., :1] * seq_len + y_true[..., 1:]
+    y_true = y_true[..., 0] * seq_len + y_true[..., 1]
     y_pre = y_pre.reshape(batch_size, labels_num, -1)
     y_pre = (y_pre)>0
 
     tp = y_pre.gather(-1, y_true).sum()
     tpfp = y_pre.sum()
     tpfn = (y_true > 0).sum()
-    return 2*tp / (tpfp + tpfn)
+    
+    if tp_pre is None:
+        return 2*tp / (tpfp + tpfn)
+    else:
+        tp += tp_pre
+        tpfp += tpfp_pre
+        tpfn += tpfn_pre
+        return 2*tp / (tpfp + tpfn), tp, tpfp, tpfn
 
 
-def em_globalpoiter(y_true, y_pre):
+def em_globalpoiter(y_true, y_pre, tp_pre=None, tpfp_pre=None):
     y_pre = y_pre.greater(0)
-    return (y_true * y_pre).sum()/ y_pre.sum()   
+    if tp_pre is None:
+        return (y_true * y_pre).sum()/ y_pre.sum() 
+    else:
+        tp = (y_true * y_pre).sum() + tp_pre
+        tpfp = y_pre.sum() + tpfp_pre
+        return tp/tpfp, tp, tpfp
 
 # em_globalpointer_sparse
-def em_globalpointer_sparse(y_true, y_pre):
+def em_globalpointer_sparse(y_true, y_pre, tp_pre=None, tpfp_pre=None):
     batch_size, labels_num, seq_len, _ = y_pre.shape
-    y_true = y_true[..., :1] * seq_len + y_true[..., 1:]
+    y_true = y_true[..., 0] * seq_len + y_true[..., 1]
     y_pre = y_pre.reshape(batch_size, labels_num, -1) > 0
-    return y_pre.gather(-1, y_true).sum() / y_pre.sum() 
+    if tp_pre is None:
+        return y_pre.gather(-1, y_true).sum() / y_pre.sum()
+    else:
+        tp = y_pre.gather(-1, y_true).sum() + tp_pre
+        tpfp = y_pre.sum() + tpfp_pre
+        return tp / tpfp, tp, tpfp
 
 def predict_globalpointer(y_pre, tags):
     res = [{}] * y_pre.shape[0]
@@ -121,7 +148,7 @@ def sparse_global_loss(y_true, y_pre):
 
     """
     batch_size, labels_num, seq_len, _ = y_pre.shape
-    y_true = y_true[..., :1] * seq_len + y_true[..., 1:]
+    y_true = y_true[..., 0] * seq_len + y_true[..., 1]
     y_pre = y_pre.reshape(batch_size, labels_num, -1)
     return torch.mean(spare_multilable_categorical_crossentropy(y_true, y_pre, True).sum(1))
 
