@@ -29,7 +29,7 @@ class EfficientGlobalPointer(torch.nn.Module):
         logits = mask(logits, mask_t, -2, -10000)
         logits[:, :, 0, :] = -10000
         logits[:, :, :, 0] = -10000
-        logits = logits.masked_fill(torch.tril(torch.ones_like(logits).to(int), -1), -10000)
+        logits = logits.masked_fill(torch.tril(torch.ones_like(logits).to(bool), -1), -10000)
         return logits
 
 

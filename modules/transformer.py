@@ -47,7 +47,7 @@ class MultiHeadAttn(nn.Module):
 
         attn = torch.matmul(q, k)  # batch_size x n_head x max_len x max_len
         attn = attn/self.scale
-        attn.masked_fill_(mask=mask[:, None, None].eq(0), value=float('-inf'))
+        attn.masked_fill_(mask=mask.to(bool)[:, None, None].eq(0), value=float('-inf'))
 
         attn = F.softmax(attn, dim=-1)  # batch_size x n_head x max_len x max_len
         attn = self.dropout_layer(attn)
