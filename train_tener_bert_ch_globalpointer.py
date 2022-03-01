@@ -99,7 +99,7 @@ def main():
     
     # debug 参数
 
-    debug = True
+    debug = False
     steps_debug = 1
     nums_train_data = -1
     nums_test_data = -1
