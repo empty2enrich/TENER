@@ -105,6 +105,7 @@ def main():
     nums_test_data = -1
     size_split = -1
     sparse = True
+    use_te = False # 是否使用 transformer encoder
 
     tags = readjson(tags_path)
     tags_mapping = {idx:tag for idx, tag in enumerate(readjson(tags_path)) } 
@@ -117,7 +118,7 @@ def main():
     # todo: 添加参数
     # todo: 加载模型可以写个封装方法
     model = TENER(tags_mapping, bert_cfg_path, dim_embedding, number_layer, d_model, heads_num, dim_feedforward,
-                  dropout, gp_head_size=gp_head_size).to(device)
+                  dropout, gp_head_size=gp_head_size, use_te=use_te).to(device)
     
     
     # 优化器

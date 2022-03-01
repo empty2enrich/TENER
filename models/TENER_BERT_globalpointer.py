@@ -29,7 +29,7 @@ class TENER(nn.Module):
     def __init__(self, tag_vocab, bert_cfg, dim_embedding, num_layers, d_model, n_head, feedforward_dim, dropout,
                  after_norm=True, attn_type='adatrans',  
                  # bi_embed=None,
-                 fc_dropout=0.3, pos_embed=None, scale=False, dropout_attn=None, gp_head_size=64):
+                 fc_dropout=0.3, pos_embed=None, scale=False, dropout_attn=None, gp_head_size=64, use_te=True):
         """
 
         :param tag_vocab: fastNLP Vocabulary, ner 的 label
@@ -50,10 +50,7 @@ class TENER(nn.Module):
         # self.embed = embed
         self.bert = load_bert(bert_cfg, True)
         embed_size = dim_embedding
-        # self.bi_embed = None
-        # if bi_embed is not None:
-        #     self.bi_embed = bi_embed
-        #     embed_size += self.bi_embed.embed_size
+        self.use_te = use_te
 
         self.in_fc = nn.Linear(embed_size, d_model)
 
@@ -79,7 +76,8 @@ class TENER(nn.Module):
         #     chars = torch.cat([chars, bigrams], dim=-1)
 
         chars = self.in_fc(chars)
-        chars = self.transformer(chars, mask_tensor)
+        if self.use_te:
+            chars = self.transformer(chars, mask_tensor)
 
         chars = self.fc_dropout(chars)
         
