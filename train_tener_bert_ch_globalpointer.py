@@ -99,7 +99,7 @@ def main():
     
     # debug 参数
 
-    debug = False
+    debug = True
     steps_debug = 1
     nums_train_data = -1
     nums_test_data = -1
@@ -208,7 +208,7 @@ def main():
                 res_compare.extend(compare_res(out, label_idx, tags, txt, [json.loads(idxstr) for idxstr in new2ori_idx_str]))
                 
             
-            f1_avg = 2* tp/tnfp
+            f1_avg = 2* tp/(tnfp + tptn)
             em_avg = tp/tptn
             logger.info(f'epoch: {epoch}, {folder} Folder: em: {em_avg}, f1:{f1_avg}')
             writejson(res_compare, os.path.join(cache_dir, res_compare_path + f'_{epoch}'))

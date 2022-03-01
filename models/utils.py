@@ -121,6 +121,9 @@ def compare_res(y_pre, y_true, tags, txts, new2ori_idxs):
         pre_res, true_res = [], []
         for tag, (start, end) in y_pre_cur - y_true_cur:
             # 减一原因：第一个 token 为 [CLS]
+            if all([start > len(new2ori_idx), end > len(new2ori_idx)]):
+                print(f'start: {start}, end: {end}, tokens num:{len(new2ori_idx)}')
+                continue
             end = min(end - 1, len(new2ori_idx) - 1)
             start_txt, end_txt = new2ori_idx[start - 1][0], new2ori_idx[end][1]
             ner_txt = txt[start_txt:end_txt]
@@ -159,16 +162,18 @@ def spare_multilable_categorical_crossentropy(y_true, y_pre, mask_zero=False, ma
     """
     # device = y_pre.device
     zeros = torch.zeros_like(y_true[..., :1])
-    y_pre = torch.cat([y_pre, zeros], -1)
+    mask_tensor = torch.ones_like(y_pre[..., :1]) * mask_value
     if mask_zero:
-        y_pre[..., 0] = - mask_value
+        y_pre = torch.cat([- mask_tensor, y_pre[..., 1:]], dim=-1)
 
     y_pos = y_pre.gather(-1, y_true)
     y_pos_2 = torch.cat([ - y_pos, zeros], dim=-1)
     loss_pos = torch.logsumexp(y_pos_2, -1)
 
+    y_pre = torch.cat([y_pre, zeros], -1)
+    
     if mask_zero:
-        y_pre[..., 0] = mask_value
+        y_pre = torch.cat([mask_tensor, y_pre[..., 1:]], dim=-1)
 
     loss_all = torch.logsumexp(y_pre, dim=-1)
     y_pos_2 = y_pre.gather(-1, y_true)

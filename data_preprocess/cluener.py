@@ -209,7 +209,7 @@ def conv2tok_lab_pair_globalpointer(source, labels, tokenizer, tags_mapping, siz
                 if not sparse:
                     labels_tokens[tags_mapping[name_label.upper()]][start_token][end_token - 1] = 1
                 else:
-                    labels_tokens[tags_mapping[name_label.upper()]].add((start, end))
+                    labels_tokens[tags_mapping[name_label.upper()]].add((start_token, end_token))
         if not is_valid:
             print(f"Label error: ==================\ntxt: {txt}, label：{label_detail}")
         else:
