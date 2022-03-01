@@ -170,9 +170,13 @@ def conv2tok_lab_pair(source, labels, tokenizer, split_label=False):
             pairs.append((tokens, labels_tokens))
     return pairs
 
+def generate_labels_gl(tags_mapping, label_detail, len_token, idx_transfer, sparse=False):
+    if not sparse:
+        pass
+
 
 @fn_timer()
-def conv2tok_lab_pair_globalpointer(source, labels, tokenizer, tags_mapping, size_save=100, cache_dir='./cache', file_name='pairs.json', data_type='trian', limit_data=-1):
+def conv2tok_lab_pair_globalpointer(source, labels, tokenizer, tags_mapping, size_split=100, cache_dir='./cache', file_name='pairs.json', data_type='trian', limit_data=-1, sparse=False):
     """
     将数据转换为 (token, label) 对。
 
@@ -192,6 +196,8 @@ def conv2tok_lab_pair_globalpointer(source, labels, tokenizer, tags_mapping, siz
             break
         tokens, idx_tranfer = tokenize_chinese(tokenizer, txt, True)
         labels_tokens = np.zeros((len(tags_mapping), len(tokens), len(tokens))).tolist()
+        if sparse:
+            labels_tokens = [set() for _ in range(len(tags_mapping))]
         is_valid = True
         # TODO : 对答案范围可进行优化（如：去掉两头的标点符号等）
         for name_label, scopes in label_detail.items():
@@ -200,16 +206,22 @@ def conv2tok_lab_pair_globalpointer(source, labels, tokenizer, tags_mapping, siz
                 break
             for start, end in scopes:
                 start_token, end_token = idx_tranfer.to_new(start), idx_tranfer.to_new(end)
-                labels_tokens[tags_mapping[name_label.upper()]][start_token][end_token - 1] = 1
+                if not sparse:
+                    labels_tokens[tags_mapping[name_label.upper()]][start_token][end_token - 1] = 1
+                else:
+                    labels_tokens[tags_mapping[name_label.upper()]].add((start_token, end_token))
         if not is_valid:
             print(f"Label error: ==================\ntxt: {txt}, label：{label_detail}")
         else:
+            if sparse:
+                labels_tokens = [list(item) for item in labels_tokens]
             pairs.append((tokens, labels_tokens, txt, json.dumps(label_detail, ensure_ascii=False), 
             json.dumps(idx_tranfer.ori2new_idx), json.dumps(idx_tranfer.new2ori_idx)))
-        if get_memory(pairs, 'MB') > size_save:
+        if size_split > 0 and len(pairs) > size_split:
             writejson(pairs, os.path.join(cache_dir, f'{file_name}_{data_type}_{file_nums}'))
             pairs = []
             file_nums += 1
+
     if pairs:
         writejson(pairs, os.path.join(cache_dir, f'{file_name}_{data_type}_{file_nums}'))
         pairs = []
@@ -255,7 +267,7 @@ def convert_features(pairs, max_len, tags_mapping, tokenizer):
 
 
 @fn_timer() 
-def convert_features_globalpointer(pairs_paths, max_len, tags_mapping, tokenizer, size_save=100, cache_dir='./cache', file_name='features.json', data_type='train', limit_data=-1):
+def convert_features_globalpointer(pairs_paths, max_len, tags_mapping, tokenizer, size_split=100, cache_dir='./cache', file_name='features.json', data_type='train', limit_data=-1, sparse=False):
     """
     转换为模型输入。
 
@@ -282,12 +294,23 @@ def convert_features_globalpointer(pairs_paths, max_len, tags_mapping, tokenizer
         if limit_data > 0 and len(inputs_idx) > limit_data:
             break
         pairs = readjson(p)
+        max_labels = 0
+        if sparse:
+            for item in pairs:
+                max_labels = max(max_labels, max([len(_) for _ in item[1]]))
         for tokens, labels, txt, labels_detail, ori2new_idx, new2ori_idx in pairs:
             tokens = ['[CLS]'] + tokens[:max_len - 2] + ['[SEP]']
             end = min(max_len -2, len(labels[0]))
-            labels_tmp = np.zeros((len(tags_mapping), max_len, max_len))
-            labels_tmp[:, 1: end + 1, 1:end+1] = np.array(labels)[:, 0: end, 0:end]
-            labels = labels_tmp.tolist()        
+            if sparse:
+                for i, item in enumerate(labels):
+                    item = [(s+1, e+1) for s,e in item]
+                    for _ in range(max_labels - len(item)):
+                        item.append((0, 0))
+                    labels[i] = item
+            else:
+                labels_tmp = np.zeros((len(tags_mapping), max_len, max_len))
+                labels_tmp[:, 1: end + 1, 1:end+1] = np.array(labels)[:, 0: end, 0:end]
+                labels = labels_tmp.tolist()        
             segment = [0] * max_len
             cur_mask = [1] * len(tokens)
             tokens +=  ['[PAD]'] * (max_len - len(tokens))
@@ -303,7 +326,7 @@ def convert_features_globalpointer(pairs_paths, max_len, tags_mapping, tokenizer
             all_idx_ori2new.append(ori2new_idx)
             all_idx_new2ori.append(new2ori_idx)
 
-            if get_memory([inputs_idx, segments, labels_idx, mask, txts, all_tokens, all_labels_detail, all_idx_ori2new, all_idx_new2ori], 'MB') > size_save:
+            if size_split > 0 and len(inputs_idx) > size_split:
                 writejson([inputs_idx, segments, labels_idx, mask, txts, all_tokens, all_labels_detail, all_idx_ori2new, all_idx_new2ori], os.path.join(cache_dir, file_name + f'_{data_type}_{file_nums}' ))
                 inputs_idx = []
                 segments = []
@@ -389,7 +412,7 @@ def get_k_folder_dataloder(data_paths, bert_cfg, tags_path, max_len, split_label
                 yield train_dataloader, test_dataloader
         
 def get_dataloader_file(data_paths, bert_cfg, tags_path, max_len, split_label,
-                         batch_size, cache_dir, model=None, size_save=100, features_path='features.json', shuffle=True, data_type='train', limit_data=-1, valid_len=4):
+                         batch_size, cache_dir, model=None, size_split=100, features_path='features.json', shuffle=True, data_type='train', limit_data=-1, valid_len=4, sparse=False):
     """处理数据量较大,存多个文件，不能直接加载到内存的数据 """
     pairs = None
     tokenizer = bert_tokenize(bert_cfg)
@@ -415,7 +438,7 @@ def get_dataloader_file(data_paths, bert_cfg, tags_path, max_len, split_label,
             source.append(cur['text'])    
             labels.append(cur['label'])
         if model == 'global_pointer':
-            pairs_paths = conv2tok_lab_pair_globalpointer(source, handle_labels(labels), tokenizer, tags_mapping, size_save, cache_dir, 'pairs.json', data_type, limit_data)
+            pairs_paths = conv2tok_lab_pair_globalpointer(source, handle_labels(labels), tokenizer, tags_mapping, size_split, cache_dir, 'pairs.json', data_type, limit_data, sparse)
         else:
             pass
         
@@ -428,7 +451,7 @@ def get_dataloader_file(data_paths, bert_cfg, tags_path, max_len, split_label,
                 if features_path in p:
                     features_paths.append(p)
         else:
-            features_paths = convert_features_globalpointer(pairs_paths, max_len, tags_mapping, tokenizer, size_save, cache_dir, features_path, data_type, limit_data)
+            features_paths = convert_features_globalpointer(pairs_paths, max_len, tags_mapping, tokenizer, size_split, cache_dir, features_path, data_type, limit_data, sparse)
         return DataLoader(FileDataset(features_paths, shuffle, valid_len=valid_len), batch_size=batch_size)
         # todo : Dataset
     else:

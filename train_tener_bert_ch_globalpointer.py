@@ -21,7 +21,7 @@ from my_py_toolkit.file.file_toolkit import readjson, make_path_legal, writejson
 from my_py_toolkit.data_visulization.tensorboard import visual_data, visual_tensorboard
 from my_py_toolkit.log.logger import get_logger
 from models.TENER_BERT_globalpointer import TENER
-from models.utils import f1_globalpointer, predict_globalpointer, compare_res
+from models.utils import f1_globalpointer, predict_globalpointer, compare_res, f1_globalpointer_sparse, em_globalpointer_sparse
 from seqeval.metrics import classification_report
 
 from torch.optim.lr_scheduler import LambdaLR
@@ -87,7 +87,7 @@ def main():
     use_fp16 = False
     max_grad_norm = 100
     
-    device = 'cuda'
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
     dir_saved_model = './cache/model/'
     
     log_dir_tsbd = '../log/tener_log/'
@@ -101,8 +101,10 @@ def main():
 
     debug = False
     steps_debug = 1
-    nums_train_data = 3000
-    nums_test_data = 1000
+    nums_train_data = -1
+    nums_test_data = -1
+    size_split = -1
+    sparse = True
 
     tags = readjson(tags_path)
     tags_mapping = {idx:tag for idx, tag in enumerate(readjson(tags_path)) } 
@@ -154,8 +156,8 @@ def main():
     
     # torch.optim
     losses = []
-    train_data = get_dataloader_file([data_paths[0]], bert_cfg_path, tags_path, max_len, split_label, batch_size, cache_dir, 'global_pointer', 1, data_type='train', limit_data=nums_train_data, valid_len=4)
-    test_data = get_dataloader_file([data_paths[1]], bert_cfg_path, tags_path, max_len, split_label, batch_size, cache_dir, 'global_pointer', 1, data_type='test', limit_data=nums_test_data, valid_len=4)
+    train_data = get_dataloader_file([data_paths[0]], bert_cfg_path, tags_path, max_len, split_label, batch_size, cache_dir, 'global_pointer', size_split, data_type='train', limit_data=nums_train_data, valid_len=4, sparse=sparse)
+    test_data = get_dataloader_file([data_paths[1]], bert_cfg_path, tags_path, max_len, split_label, batch_size, cache_dir, 'global_pointer', size_split, data_type='test', limit_data=nums_test_data, valid_len=4, sparse=sparse)
     for folder in range(1):
         # 全训练机器太慢，只训练部分。
         if folder > 0:
@@ -168,7 +170,7 @@ def main():
                     break
                 input_idx, label_idx, segments = input_idx.to(device), label_idx.to(device), segments.to(device)
                 opt.zero_grad()
-                out = model(input_idx, label_idx, segments)
+                out = model(input_idx, label_idx, segments, sparse)
                 loss = out.get('loss')
                 f1 = out.get('f1')
                 visual_tensorboard(log_dir_tsbd, f'train {folder} folder', {'loss': [loss.item()], 'f1': [f1.item()]}, epoch, step)
@@ -187,23 +189,24 @@ def main():
             
             
             model.eval()
-            tp, tnfp, tptn = 0, 0, 0
+            tp, tpfp, tpfn = 0, 0, 0
             res_compare = []
             for step, (input_idx, segments, label_idx, _, txt, tokens, labels_detail, ori2new_idx_str, new2ori_idx_str) in tqdm(enumerate(test_data)): 
                 if debug and step > steps_debug - 1:
                     break
                 input_idx, label_idx, segments = input_idx.to(device), label_idx.to(device), segments.to(device)
-                out = model(input_idx, None, segments)
+                out = model(input_idx, None, segments, sparse)
                 out = out.greater(0)
-                tp += (label_idx * out).sum().item()
-                tnfp += label_idx.sum().item() + out.sum().item()
-                tptn += out.sum().item()
-                print(tp, tnfp, tptn)
+                if sparse:
+                    _, tp, tpfp, tpfn = f1_globalpointer_sparse(label_idx, out, tp, tpfp, tpfn)
+                else:
+                    _, tp, tpfp, tpfn = f1_globalpointer(label_idx, out, tp, tpfp, tpfn)
+                    
                 res_compare.extend(compare_res(out, label_idx, tags, txt, [json.loads(idxstr) for idxstr in new2ori_idx_str]))
                 
             
-            f1_avg = 2* tp/tnfp
-            em_avg = tp/tptn
+            f1_avg = 2* tp/(tpfp + tpfn)
+            em_avg = tp/tpfp
             logger.info(f'epoch: {epoch}, {folder} Folder: em: {em_avg}, f1:{f1_avg}')
             writejson(res_compare, os.path.join(cache_dir, res_compare_path + f'_{epoch}'))
             visual_tensorboard(log_dir_tsbd, f'test_{folder} folder', {'em':[em_avg], 'f1':[f1_avg]}, 1, epoch)
