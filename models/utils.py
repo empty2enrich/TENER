@@ -122,7 +122,7 @@ def compare_res(y_pre, y_true, tags, txts, new2ori_idxs):
         for tag, (start, end) in y_pre_cur - y_true_cur:
             # 减一原因：第一个 token 为 [CLS]
             if all([start > len(new2ori_idx), end > len(new2ori_idx)]):
-                print(f'start: {start}, end: {end}, tokens num:{len(new2ori_idx)}')
+                # print(f'start: {start}, end: {end}, tokens num:{len(new2ori_idx)}')
                 continue
             end = min(end - 1, len(new2ori_idx) - 1)
             start_txt, end_txt = new2ori_idx[start - 1][0], new2ori_idx[end][1]

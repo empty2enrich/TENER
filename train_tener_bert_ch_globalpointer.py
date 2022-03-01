@@ -21,7 +21,7 @@ from my_py_toolkit.file.file_toolkit import readjson, make_path_legal, writejson
 from my_py_toolkit.data_visulization.tensorboard import visual_data, visual_tensorboard
 from my_py_toolkit.log.logger import get_logger
 from models.TENER_BERT_globalpointer import TENER
-from models.utils import f1_globalpointer, predict_globalpointer, compare_res
+from models.utils import f1_globalpointer, predict_globalpointer, compare_res, f1_globalpointer_sparse, em_globalpointer_sparse
 from seqeval.metrics import classification_report
 
 from torch.optim.lr_scheduler import LambdaLR
@@ -189,7 +189,7 @@ def main():
             
             
             model.eval()
-            tp, tnfp, tptn = 0, 0, 0
+            tp, tpfp, tpfn = 0, 0, 0
             res_compare = []
             for step, (input_idx, segments, label_idx, _, txt, tokens, labels_detail, ori2new_idx_str, new2ori_idx_str) in tqdm(enumerate(test_data)): 
                 if debug and step > steps_debug - 1:
@@ -198,18 +198,15 @@ def main():
                 out = model(input_idx, None, segments, sparse)
                 out = out.greater(0)
                 if sparse:
-                    # todo
-                    pass
+                    _, tp, tpfp, tpfn = f1_globalpointer_sparse(label_idx, out, tp, tpfp, tpfn)
                 else:
-                    tp += (label_idx * out).sum().item()
-                    tnfp += label_idx.sum().item() + out.sum().item()
-                    tptn += out.sum().item()
-                    print(tp, tnfp, tptn)
+                    _, tp, tpfp, tpfn = f1_globalpointer(label_idx, out, tp, tpfp, tpfn)
+                    
                 res_compare.extend(compare_res(out, label_idx, tags, txt, [json.loads(idxstr) for idxstr in new2ori_idx_str]))
                 
             
-            f1_avg = 2* tp/(tnfp + tptn)
-            em_avg = tp/tptn
+            f1_avg = 2* tp/(tpfp + tpfn)
+            em_avg = tp/tpfp
             logger.info(f'epoch: {epoch}, {folder} Folder: em: {em_avg}, f1:{f1_avg}')
             writejson(res_compare, os.path.join(cache_dir, res_compare_path + f'_{epoch}'))
             visual_tensorboard(log_dir_tsbd, f'test_{folder} folder', {'em':[em_avg], 'f1':[f1_avg]}, 1, epoch)
