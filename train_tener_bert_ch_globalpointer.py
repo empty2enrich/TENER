@@ -69,7 +69,7 @@ def main():
     bert_cfg = readjson(os.path.join(bert_cfg_path, 'bert_config.json'))
     max_len = 64 # bert_cfg.get('max_position_embeddings')
     dim_embedding = bert_cfg.get('hidden_size')
-    batch_size = 70
+    batch_size = 50
     epochs = 6
     number_layer = 1
     d_model = 768 
@@ -100,7 +100,7 @@ def main():
     # debug 参数
 
     debug = False
-    steps_debug = 1
+    steps_debug = 10
     nums_train_data = -1
     nums_test_data = -1
     size_split = -1
@@ -189,7 +189,8 @@ def main():
             
             
             model.eval()
-            tp, tpfp, tpfn = 0, 0, 0
+            # 避免除 0 操作。
+            tp, tpfp, tpfn = 1, 1, 1
             res_compare = []
             for step, (input_idx, segments, label_idx, _, txt, tokens, labels_detail, ori2new_idx_str, new2ori_idx_str) in tqdm(enumerate(test_data)): 
                 if debug and step > steps_debug - 1:
@@ -207,9 +208,9 @@ def main():
             
             f1_avg = 2* tp/(tpfp + tpfn)
             em_avg = tp/tpfp
-            logger.info(f'epoch: {epoch}, {folder} Folder: em: {em_avg}, f1:{f1_avg}')
+            logger.info(f'epoch: {epoch}, {folder} Folder: em: {em_avg}, f1:{f1_avg}, tp:{tp}, tpfp:{tpfp}, tpfn:{tpfn}')
             writejson(res_compare, os.path.join(cache_dir, res_compare_path + f'_{epoch}'))
-            visual_tensorboard(log_dir_tsbd, f'test_{folder} folder', {'em':[em_avg], 'f1':[f1_avg]}, 1, epoch)
+            visual_tensorboard(log_dir_tsbd, f'test_{folder} folder', {'em':[em_avg.item()], 'f1':[f1_avg.item()]}, 1, epoch)
             
             
             
