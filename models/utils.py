@@ -101,6 +101,7 @@ def predict_globalpointer(y_pre, tags):
             res[b][tags[tag_idx]] = []
         res[b][tags[tag_idx]].append((start, end))
     return res
+    
 
 def predict_globalpointer_compare(y_pre, tags):
     res = [[] for _ in range(y_pre.shape[0])]
@@ -110,10 +111,22 @@ def predict_globalpointer_compare(y_pre, tags):
         
     return res
 
+def handle_true_sparse(y_true, tags):
+    """"""
+    res = []
+    for t in y_true.tolist():
+        cur_res = []
+        for tag_id, scopes in enumerate(t):
+            for s, e in scopes:
+                if s == 0 and e == 0:
+                    continue
+                cur_res.append((tags[tag_id], (s, e)))
+        res.append(cur_res)
+    return res
 
-def compare_res(y_pre, y_true, tags, txts, new2ori_idxs):
+def compare_res(y_pre, y_true, tags, txts, new2ori_idxs, sparse=False):
     y_pre = predict_globalpointer_compare(y_pre, tags)
-    y_true = predict_globalpointer_compare(y_true, tags)
+    y_true = predict_globalpointer_compare(y_true, tags) if not sparse else handle_true_sparse(y_true, tags)
     res = []
     for y_pre_cur, y_true_cur, txt, new2ori_idx in zip(y_pre, y_true, txts, new2ori_idxs):
         y_pre_cur, y_true_cur = set(y_pre_cur), set(y_true_cur)
@@ -136,7 +149,7 @@ def compare_res(y_pre, y_true, tags, txts, new2ori_idxs):
         if pre_res:
             cur_res['pre'] = pre_res
         if true_res:
-            cur_res['true'] = pre_res
+            cur_res['true'] = true_res
         if cur_res:
             cur_res['txt'] = txt
         if cur_res:
@@ -181,3 +194,5 @@ def spare_multilable_categorical_crossentropy(y_true, y_pre, mask_zero=False, ma
     # 可能需要加一个 clip 操作
     loss_neg = loss_all + torch.log(1 - torch.exp(loss_aux - loss_all))
     return loss_pos + loss_neg
+
+

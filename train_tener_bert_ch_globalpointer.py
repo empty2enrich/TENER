@@ -5,6 +5,8 @@
 # cython: language_level=3
 
 # from functools import cache
+from cProfile import label
+import enum
 import json
 import logging
 import os
@@ -12,19 +14,22 @@ from tkinter import N
 from numpy import mod, number
 from tqdm import tqdm
 import torch
-from torch import optim
+from torch import optim, zero_
 from torch.nn.functional import dropout
 # from torch.optim.lr_scheduler import
 
-from data_preprocess.cluener import get_k_folder_dataloder, get_dataloader_file
+from data_preprocess.cluener import get_k_folder_dataloder, get_dataloader_file, get_dataloader_test
 from my_py_toolkit.file.file_toolkit import readjson, make_path_legal, writejson
 from my_py_toolkit.data_visulization.tensorboard import visual_data, visual_tensorboard
 from my_py_toolkit.log.logger import get_logger
+from my_py_toolkit.torch.transformers_pkg import bert_tokenize
 from models.TENER_BERT_globalpointer import TENER
-from models.utils import f1_globalpointer, predict_globalpointer, compare_res, f1_globalpointer_sparse, em_globalpointer_sparse
+from models.utils import f1_globalpointer, predict_globalpointer, compare_res, f1_globalpointer_sparse, em_globalpointer_sparse, predict_globalpointer_compare
 from seqeval.metrics import classification_report
 
 from torch.optim.lr_scheduler import LambdaLR
+
+
 
 def get_linear_warmup(optizer, nums_warmup_step, nums_train_step, last_epoch=-1):
     def warmup(cur_step):
@@ -70,7 +75,7 @@ def main():
     max_len = 64 # bert_cfg.get('max_position_embeddings')
     dim_embedding = bert_cfg.get('hidden_size')
     batch_size = 50
-    epochs = 6
+    epochs = 10
     number_layer = 1
     d_model = 768 
     heads_num = 128      
@@ -79,8 +84,8 @@ def main():
     dropout = 0.95
     warmup = 100
     lr = 3e-5
-    bert_lr = 3e-5
-    other_lr = 1e-3
+    bert_lr = 2e-5
+    other_lr = 2e-5
     weight_decay_bert = 0.0
     weight_decay_other = 0.0
 
@@ -93,12 +98,13 @@ def main():
     log_dir_tsbd = '../log/tener_log/'
     log_dir = '../log/run.log'
     data_paths = [os.path.join(data_dir, 'train.json'), os.path.join(data_dir, 'dev.json')]
+    test_path = os.path.join(data_dir, 'test.json')
     res_compare_path = 'res_compare.json'
     
     split_label = True
     
     # debug 参数
-
+    is_train = True
     debug = False
     steps_debug = 10
     nums_train_data = -1
@@ -106,6 +112,7 @@ def main():
     size_split = -1
     sparse = True
     use_te = False # 是否使用 transformer encoder
+    model_saved = os.path.join(cache_dir, 'model/tener_weight_0_0.pkl')
 
     tags = readjson(tags_path)
     tags_mapping = {idx:tag for idx, tag in enumerate(readjson(tags_path)) } 
@@ -155,6 +162,50 @@ def main():
         network_to_half(model)
         model.apply(fix_bn)
     
+    if is_train:
+        train_model(cache_dir, tags_path, bert_cfg_path, max_len, batch_size, epochs, warmup, use_fp16, max_grad_norm, device, dir_saved_model, log_dir_tsbd, data_paths, res_compare_path, split_label, debug, steps_debug, nums_train_data, nums_test_data, size_split, sparse, tags, logger, model, opt)
+    else:
+        test_model(cache_dir, bert_cfg_path, max_len, batch_size, device, test_path, model_saved, tags_mapping, model, debug, steps_debug)
+
+def test_model(cache_dir, bert_cfg_path, max_len, batch_size, device, test_path, model_saved, tags_mapping, model, debug, steps_debug):
+    daseset_test = get_dataloader_test(test_path, bert_cfg_path, max_len, batch_size)
+    model.load_state_dict(torch.load(model_saved))
+    model.eval()
+    res = []
+    for step, (idx, input_idx, segments, txt, new2ori_idx) in enumerate(daseset_test):
+        if step > steps_debug:
+            break
+        idx, input_idx, segments = idx.to(device), input_idx.to(device), segments.to(device)
+        out = model.predict(input_idx, segments)
+        pre_res = predict_globalpointer_compare(out, tags_mapping)
+        res.extend(generate_res_batch(idx, txt, pre_res, new2ori_idx))
+    writejson(res, os.path.join(cache_dir, 'test_predict.json'))
+
+def generate_res_batch(idx_batch, txts_bacth, pre_res_batch, new2ori_idxs_batch):
+    res = []
+    for idx, txt, pre_res, new2ori_idx in zip(idx_batch, txts_bacth, pre_res_batch, new2ori_idxs_batch):
+        new2ori_idx = json.loads(new2ori_idx)
+        label_info = {}
+        for label, (start, end) in pre_res:
+            if all([v > len(new2ori_idx) for v in [start, end]]):
+                continue
+            end = min(end - 1, len(new2ori_idx) - 1)
+            start = min(start - 1, len(new2ori_idx) - 1)
+            if not label in label_info:
+                label_info[label] = {}
+            start_txt, end_txt = new2ori_idx[start][0], new2ori_idx[end][1]
+            entity = txt[start_txt:end_txt]
+            if entity in label_info[label]:
+                label_info[label][entity].append([start_txt, end_txt])
+            else:
+                label_info[label][entity] = [[start_txt, end_txt]]
+            
+        res.append({'id': idx.item(), 'label': label_info})
+    return res
+
+
+
+def train_model(cache_dir, tags_path, bert_cfg_path, max_len, batch_size, epochs, warmup, use_fp16, max_grad_norm, device, dir_saved_model, log_dir_tsbd, data_paths, res_compare_path, split_label, debug, steps_debug, nums_train_data, nums_test_data, size_split, sparse, tags, logger, model, opt):
     # torch.optim
     losses = []
     train_data = get_dataloader_file([data_paths[0]], bert_cfg_path, tags_path, max_len, split_label, batch_size, cache_dir, 'global_pointer', size_split, data_type='train', limit_data=nums_train_data, valid_len=4, sparse=sparse)
@@ -204,7 +255,7 @@ def main():
                 else:
                     _, tp, tpfp, tpfn = f1_globalpointer(label_idx, out, tp, tpfp, tpfn)
                     
-                res_compare.extend(compare_res(out, label_idx, tags, txt, [json.loads(idxstr) for idxstr in new2ori_idx_str]))
+                res_compare.extend(compare_res(out, label_idx, tags, txt, [json.loads(idxstr) for idxstr in new2ori_idx_str], True))
                 
             
             f1_avg = 2* tp/(tpfp + tpfn)

@@ -436,7 +436,7 @@ def get_dataloader_file(data_paths, bert_cfg, tags_path, max_len, split_label,
         for line in datas:
             cur = json.loads(line)
             source.append(cur['text'])    
-            labels.append(cur['label'])
+            labels.append(cur.get('label', {}))
         if model == 'global_pointer':
             pairs_paths = conv2tok_lab_pair_globalpointer(source, handle_labels(labels), tokenizer, tags_mapping, size_split, cache_dir, 'pairs.json', data_type, limit_data, sparse)
         else:
@@ -472,3 +472,37 @@ def get_dataloader_file(data_paths, bert_cfg, tags_path, max_len, split_label,
         #         yield train_dataloader, test_dataloader
 
 
+###############################  test ###############################################
+
+def handle_test_data(test_path, bert_cfg, max_len):
+    input_idx = []
+    segments = []
+    idx = []
+    txt = []
+    idx_tranf = []
+    tokenizer = bert_tokenize(bert_cfg)
+    for line in read_file(test_path, '\n'):
+        if not line:
+            continue
+        line = json.loads(line)
+        idx.append(line['id'])
+        tokens, transf = tokenize_chinese(tokenizer, line['text'], True)
+        # tokens = tokenizer.tokenize(line['text'])
+        tokens = tokens[:max_len - 2]
+        tokens = ['[CLS]'] + tokens + ['[SEP]']
+        
+        tokens += ['[PAD]'] * (max_len - len(tokens))
+        segments.append([0] * max_len)
+        input_idx.append(tokenizer.convert_tokens_to_ids(tokens))
+        txt.append(line['text'])
+        idx_tranf.append(transf)
+    return idx, input_idx, segments, txt, idx_tranf
+
+@fn_timer()
+def get_dataloader_test(test_path, bert_cfg, max_len, batch_size, cache_dir='./cache'):
+    """加载数据 for test. """
+    features_path = os.path.join(cache_dir, 'test_features.json')
+    if not os.path.exists(features_path):
+        idx, input_idx, segments, txt, idx_tranf = handle_test_data(test_path, bert_cfg, max_len)
+        writejson([idx, input_idx, segments, txt, [json.dumps(transf.new2ori_idx, ensure_ascii=False) for transf in idx_tranf]], features_path)
+    return DataLoader(FileDataset([features_path], True, 3), batch_size=batch_size)
