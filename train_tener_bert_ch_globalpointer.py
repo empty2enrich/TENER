@@ -84,8 +84,8 @@ def main():
     dropout = 0.95
     warmup = 100
     lr = 3e-5
-    bert_lr = 2e-5
-    other_lr = 2e-5
+    bert_lr = 3e-5
+    other_lr = 1e-3
     weight_decay_bert = 0.0
     weight_decay_other = 0.0
 
@@ -104,15 +104,15 @@ def main():
     split_label = True
     
     # debug 参数
-    is_train = True
+    is_train = False
     debug = False
-    steps_debug = 10
+    steps_debug = 1
     nums_train_data = -1
     nums_test_data = -1
     size_split = -1
     sparse = True
     use_te = False # 是否使用 transformer encoder
-    model_saved = os.path.join(cache_dir, 'model/tener_weight_0_0.pkl')
+    model_saved = os.path.join(cache_dir, 'model/most/tener_weight_0_5.pkl')
 
     tags = readjson(tags_path)
     tags_mapping = {idx:tag for idx, tag in enumerate(readjson(tags_path)) } 
