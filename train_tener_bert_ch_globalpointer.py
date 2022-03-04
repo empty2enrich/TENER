@@ -85,7 +85,7 @@ def main():
     warmup = 100
     lr = 3e-5
     bert_lr = 3e-5
-    other_lr = 1e-3
+    other_lr = 1e-4
     weight_decay_bert = 0.0
     weight_decay_other = 0.0
 
@@ -104,14 +104,14 @@ def main():
     split_label = True
     
     # debug 参数
-    is_train = False
+    is_train = True
     debug = False
     steps_debug = 1
     nums_train_data = -1
     nums_test_data = -1
     size_split = -1
     sparse = True
-    use_te = False # 是否使用 transformer encoder
+    use_te = True # 是否使用 transformer encoder
     model_saved = os.path.join(cache_dir, 'model/most/tener_weight_0_5.pkl')
 
     tags = readjson(tags_path)
@@ -169,7 +169,7 @@ def main():
 
 def test_model(cache_dir, bert_cfg_path, max_len, batch_size, device, test_path, model_saved, tags_mapping, model, debug, steps_debug):
     daseset_test = get_dataloader_test(test_path, bert_cfg_path, max_len, batch_size)
-    model.load_state_dict(torch.load(model_saved))
+    model.load_state_dict(torch.load(model_saved, map_location=device))
     model.eval()
     res = []
     for step, (idx, input_idx, segments, txt, new2ori_idx) in enumerate(daseset_test):
