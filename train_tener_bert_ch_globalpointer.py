@@ -85,7 +85,7 @@ def main():
     warmup = 100
     lr = 3e-5
     bert_lr = 3e-5
-    other_lr = 1e-4
+    other_lr = 1e-3
     weight_decay_bert = 0.0
     weight_decay_other = 0.0
 
@@ -105,6 +105,7 @@ def main():
     
     # debug 参数
     is_train = True
+    is_continue = True
     debug = False
     steps_debug = 1
     nums_train_data = -1
@@ -113,6 +114,7 @@ def main():
     sparse = True
     use_te = True # 是否使用 transformer encoder
     model_saved = os.path.join(cache_dir, 'model/most/tener_weight_0_5.pkl')
+    model_continue = os.path.join(cache_dir, 'model/tener_weight_0_9.pkl')
 
     tags = readjson(tags_path)
     tags_mapping = {idx:tag for idx, tag in enumerate(readjson(tags_path)) } 
@@ -126,7 +128,9 @@ def main():
     # todo: 加载模型可以写个封装方法
     model = TENER(tags_mapping, bert_cfg_path, dim_embedding, number_layer, d_model, heads_num, dim_feedforward,
                   dropout, gp_head_size=gp_head_size, use_te=use_te).to(device)
-    
+    if is_continue:
+        print(f'start loading saved model ......')
+        model.load_state_dict(torch.load(model_continue, map_location=device))
     
     # 优化器
     no_decay = ['bias', 'LayerNorm.weight']

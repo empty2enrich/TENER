@@ -40,7 +40,7 @@ def handle_log():
 def handle_log_gp():
     reg = 'em: (?P<em>[\\d\\.]+).*f1.*?(?P<f1>[\\d\\.]+).*?tp.*?(?P<tp>[\\d\\.]+).*?tpfp.*?(?P<tpfp>[\\d\\.]+).*?tpfn.*?(?P<tpfn>[\\d\\.]+)'
     log_path = 'tools/files/run.log'
-    res_path = './gp_res.xlsx'
+    res_path = './tools/gp_res.xlsx'
     res = []
     keys = ['f1', 'em', 'tp', 'tpfp', 'tpfn']
     res.append(keys)
