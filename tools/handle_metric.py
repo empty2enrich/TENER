@@ -39,10 +39,13 @@ def handle_log():
 
 def handle_log_gp():
     reg = 'em: (?P<em>[\\d\\.]+).*f1.*?(?P<f1>[\\d\\.]+).*?tp.*?(?P<tp>[\\d\\.]+).*?tpfp.*?(?P<tpfp>[\\d\\.]+).*?tpfn.*?(?P<tpfn>[\\d\\.]+)'
+    reg_loss = 'epoch.*?(?P<epoch>\\d+).*?loss.*?(?P<loss>[\\d\\.]+)'
     log_path = 'tools/files/run.log'
     res_path = './tools/gp_res.xlsx'
     res = []
     keys = ['f1', 'em', 'tp', 'tpfp', 'tpfn']
+    loss_info = [['min_loss', 'max_loss', 'avg_loss']]
+
     res.append(keys)
     with open(log_path, 'r', encoding='utf-8') as f:
         for line in f.readlines():
@@ -53,8 +56,26 @@ def handle_log_gp():
                     print(line)
                     for k in keys:
                         cur.append(match[k])
+                # loss 信息
+                match = re.search(reg_loss, line)
+                if match:
+                    epoch = int(match['epoch'])
+                    loss = float(match['loss'])
+                    if epoch >= len(loss_info) - 1:
+                        loss_info.append([loss, loss, loss, 1])
+                    else:
+                        cur_loss = loss_info[epoch + 1]
+                        cur_loss[0] = min(cur_loss[0], loss)
+                        cur_loss[1] = max(cur_loss[1], loss)
+                        cur_loss[2] += loss
+                        cur_loss[3] += 1
+
             if cur:
                 res.append(cur)
+    res[0] = loss_info[0] + res[0]
+    for i, item in enumerate(res[1:]):
+        cur_loss = loss_info[i + 1]
+        res[i + 1] = cur_loss[:2] + [cur_loss[2]/cur_loss[3]] + res[i + 1]
     write_excel(res, res_path)
 
 if __name__ == "__main__":
