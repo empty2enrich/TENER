@@ -9,6 +9,7 @@ from cProfile import label
 import enum
 import json
 import logging
+from msilib.schema import Error
 import os
 from tkinter import N
 from numpy import mod, number
@@ -229,6 +230,13 @@ def train_model(cache_dir, tags_path, bert_cfg_path, max_len, batch_size, epochs
                 out = model(input_idx, label_idx, segments, sparse)
                 loss = out.get('loss')
                 f1 = out.get('f1')
+                # debug
+                if loss.isneginf() or loss.isinf() or f1.isneginf() or f1.isinf():
+                    out = model(input_idx, None, segments, sparse)
+                    writejson([out.tolist(), label_idx.tolist()], f'{cache_dir}/out.json')
+                    raise Exception('-inf')
+                    
+                logger.info(f'epoch: {epoch}, {folder} Folder, Step: {step}, loss: {loss.item()}, f1: {f1.item()}')
                 visual_tensorboard(log_dir_tsbd, f'train {folder} folder', {'loss': [loss.item()], 'f1': [f1.item()]}, epoch, step)
                 losses.append(loss.item())
                 loss.backward()
@@ -240,7 +248,6 @@ def train_model(cache_dir, tags_path, bert_cfg_path, max_len, batch_size, epochs
                     
                 opt.step()
                 scheduler.step()
-                logger.info(f'epoch: {epoch}, {folder} Folder, Step: {step}, loss: {loss.item()}')
             torch.save(model.state_dict(), os.path.join(dir_saved_model, f'tener_weight_{folder}_{epoch}.pkl'))
             
             
