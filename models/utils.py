@@ -6,7 +6,9 @@
 
 # sin 位置编码
 
+import numpy as np
 import torch
+import tensorboard as tb
 from my_py_toolkit.torch.transformer_utils import gen_pos_emb
 from my_py_toolkit.torch.tensor_toolkit import mask
 
@@ -17,12 +19,10 @@ def rope(inputs):
     device = inputs.device
     length, dim = inputs.shape[-2:]
     pos = gen_pos_emb(length, dim)
-    inputs_2 = torch.zeros_like(inputs)
-    inputs_2[..., ::2] = -inputs[..., 1::2]
-    inputs_2[..., 1::2] = inputs[..., ::2]
-    sin, cos = torch.zeros_like(pos), torch.zeros_like(pos)
-    sin[:, ::2], sin[:, 1::2] = pos[:, ::2], pos[:, ::2]
-    cos[:, ::2], cos[:, 1::2] = pos[:, 1::2], pos[:, 1::2]
+    inputs_2 = torch.stack([-inputs[..., 1::2], inputs[..., ::2]], -1).reshape_as(inputs)
+    sin = torch.repeat_interleave(pos[:, ::2], 2, -1).reshape_as(pos)
+    cos = torch.repeat_interleave(pos[:, 1::2], 2, -1).reshape_as(pos)
+
     return inputs * cos.to(device) + inputs_2 * sin.to(device)
 
 def multilabel_categorical_crossentropy(y_true, y_pre):
@@ -157,42 +157,85 @@ def compare_res(y_pre, y_true, tags, txts, new2ori_idxs, sparse=False):
     return res
     
 
-def sparse_global_loss(y_true, y_pre):
-    """
-    y_true( batch_size, labes_num, 2)
-    y_pre(batch_size, labels_num, seq_len, seq_len)
+# def sparse_global_loss(y_true, y_pre):
+#     """
+#     y_true( batch_size, labes_num, 2)
+#     y_pre(batch_size, labels_num, seq_len, seq_len)
 
-    """
-    batch_size, labels_num, seq_len, _ = y_pre.shape
-    y_true = y_true[..., 0] * seq_len + y_true[..., 1]
-    y_pre = y_pre.reshape(batch_size, labels_num, -1)
-    return torch.mean(spare_multilable_categorical_crossentropy(y_true, y_pre, True).sum(1))
+#     """
+#     batch_size, labels_num, seq_len, _ = y_pre.shape
+#     y_true = y_true[..., 0] * seq_len + y_true[..., 1]
+#     y_pre = y_pre.reshape(batch_size, labels_num, -1)
+#     return torch.mean(spare_multilable_categorical_crossentropy(y_true, y_pre, True).sum(1))
 
-def spare_multilable_categorical_crossentropy(y_true, y_pre, mask_zero=False, mask_value=-10000):
-    """
-    y_true(batch_size, labels_num, 1)
-    y_pre(batch_size, labels_num, seq_len * seq_len)
-    """
-    # device = y_pre.device
-    zeros = torch.zeros_like(y_true[..., :1])
-    mask_tensor = torch.ones_like(y_pre[..., :1]) * mask_value
-    if mask_zero:
-        y_pre = torch.cat([- mask_tensor, y_pre[..., 1:]], dim=-1)
+# def spare_multilable_categorical_crossentropy(y_true, y_pre, mask_zero=False, mask_value=-10000):
+#     """
+#     y_true(batch_size, labels_num, 1)
+#     y_pre(batch_size, labels_num, seq_len * seq_len)
+#     """
+#     # device = y_pre.device
+#     zeros = torch.zeros_like(y_true[..., :1])
+#     mask_tensor = torch.ones_like(y_pre[..., :1]) * mask_value
+#     if mask_zero:
+#         y_pre = torch.cat([- mask_tensor, y_pre[..., 1:]], dim=-1)
 
-    y_pos = y_pre.gather(-1, y_true)
-    y_pos_2 = torch.cat([ - y_pos, zeros], dim=-1)
-    loss_pos = torch.logsumexp(y_pos_2, -1)
+#     y_pos = y_pre.gather(-1, y_true)
+#     y_pos_2 = torch.cat([ - y_pos, zeros], dim=-1)
+#     loss_pos = torch.logsumexp(y_pos_2, -1)
 
-    y_pre = torch.cat([y_pre, zeros], -1)
+#     y_pre = torch.cat([y_pre, zeros], -1)
     
+#     if mask_zero:
+#         y_pre = torch.cat([mask_tensor, y_pre[..., 1:]], dim=-1)
+
+#     loss_all = torch.logsumexp(y_pre, dim=-1)
+#     y_pos_2 = y_pre.gather(-1, y_true)
+#     loss_aux = torch.logsumexp(y_pos_2, dim=-1)
+#     # 可能需要加一个 clip 操作,不加可能出现 loss 为 -inf
+#     loss_aux = torch.clip(1 - torch.exp(loss_aux - loss_all), torch.tensor(1e-7), torch.tensor(1))
+#     loss_neg = loss_all + torch.log(loss_aux)
+#     return loss_pos + loss_neg
+
+
+
+def sparse_multilabel_categorical_crossentropy(
+    y_true, y_pred, mask_zero=False, epsilon=1e-7, Inf=1e12
+):
+    """稀疏版多标签分类的交叉熵
+    说明：
+        1. y_true.shape=[..., num_positive]，
+           y_pred.shape=[..., num_classes]；
+        2. 请保证y_pred的值域是全体实数，换言之一般情况下
+           y_pred不用加激活函数，尤其是不能加sigmoid或者
+           softmax；
+        3. 预测阶段则输出y_pred大于0的类；
+        4. 详情请看：https://kexue.fm/archives/7359 。
+    """
+    zeros = torch.zeros_like(y_pred[..., :1])
+    y_pred = torch.cat([y_pred, zeros], dim=-1)
     if mask_zero:
-        y_pre = torch.cat([mask_tensor, y_pre[..., 1:]], dim=-1)
+        infs = zeros + Inf
+        y_pred = torch.cat([infs, y_pred[..., 1:]], dim=-1)
 
-    loss_all = torch.logsumexp(y_pre, dim=-1)
-    y_pos_2 = y_pre.gather(-1, y_true)
-    loss_aux = torch.logsumexp(y_pos_2, dim=-1)
-    # 可能需要加一个 clip 操作
-    loss_neg = loss_all + torch.log(1 - torch.exp(loss_aux - loss_all))
-    return loss_pos + loss_neg
+    y_pos_2 = torch.gather(y_pred, index=y_true, dim=-1)
+    y_pos_1 = torch.cat([y_pos_2, zeros], dim=-1)
+    if mask_zero:
+        y_pred = torch.cat([-infs, y_pred[..., 1:]], dim=-1)
+        y_pos_2 = torch.gather(y_pred, index=y_true, dim=-1)
+    pos_loss = torch.logsumexp(-y_pos_1, dim=-1)
+    all_loss = torch.logsumexp(y_pred, dim=-1)
+    aux_loss = torch.logsumexp(y_pos_2, dim=-1) - all_loss
+    aux_loss = torch.clamp(1 - torch.exp(aux_loss), min=epsilon, max=1)
+    neg_loss = all_loss + torch.log(aux_loss)
+    return pos_loss + neg_loss
 
 
+def sparse_global_loss(y_true, y_pred):
+    shape = y_pred.shape
+    # bs, nclass, max_spo_num
+    y_true = y_true[..., 0] * shape[2] + y_true[..., 1]
+    # bs, nclass, seqlen * seqlen
+    y_pred = y_pred.reshape(shape[0], -1, np.prod(shape[2:]))
+    loss = sparse_multilabel_categorical_crossentropy(
+        y_true, y_pred, mask_zero=True)
+    return loss.sum(dim=1).mean()

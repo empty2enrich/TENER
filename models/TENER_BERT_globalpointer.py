@@ -69,7 +69,7 @@ class TENER(nn.Module):
 
     def _forward(self, inputs_idx, target, segments, sparse=False, bigrams=None):
         mask_tensor = inputs_idx.ne(0).to(int)
-        chars, _ = self.bert(inputs_idx, segments)
+        chars, _ = self.bert(inputs_idx, mask_tensor)
         # chars = self.embed(chars)
         # if self.bi_embed is not None:
         #     bigrams = self.bi_embed(bigrams)

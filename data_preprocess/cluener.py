@@ -29,6 +29,29 @@ from torch.utils.data import DataLoader, TensorDataset, IterableDataset
 
 ############################################################  可加入 toolkit
 
+class FileDatasetPad(IterableDataset):
+    def __init__(self, paths, shuffle=False, valid_len=4):
+        super().__init__()
+        self.paths = paths
+        self.shuffle = shuffle
+        self.valid_len = valid_len
+        self.size = 0
+        for p in self.paths:
+            self.size += len(readjson(p)[0])
+    
+    def __iter__(self):
+        for p in self.paths:
+            datas = readjson(p)
+            idx = list(range(len(datas[0])))
+            if self.shuffle:
+                random.shuffle(idx)
+            for i in idx:
+                batch = [item[i] for item in datas]
+                yield batch
+                
+    def __len__(self):
+        return self.size
+                
 class FileDataset(IterableDataset):
     def __init__(self, paths, shuffle=False, valid_len=4):
         super().__init__()
@@ -49,7 +72,9 @@ class FileDataset(IterableDataset):
             if self.shuffle:
                 random.shuffle(idx)
             for i in idx:
-                yield [item[i] for item in datas]
+                batch = [item[i] for item in datas]
+                
+                yield batch
 
     def __len__(self):
         return self.size
